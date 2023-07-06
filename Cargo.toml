@@ -1,0 +1,15 @@
+[package]
+name = "nscript_v2"
+version = "0.1.0"
+edition = "2021"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+#serde = "1.0.152"
+#tokio = { version = "1.16.1", features = ["full"] }
+[dependencies]
+chrono = "0.4.23"
+colored = "2.0.0"
+num = "0.4.0"
+hex = "0.4"
+reqwest = { version = "0.11", features = ["blocking"] }
+openssl-sys = "0.9"
