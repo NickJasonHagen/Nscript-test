@@ -2,3 +2,6 @@
 /.vscode
 /testfiles
 /public
+
+/bin
+/domains

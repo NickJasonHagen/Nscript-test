@@ -1,23 +1,23 @@
+//use core::num::dec2flt::parse::parse_number;
 // Nscript v2 ( remade from au3 nscript) by Nick Hagen.
 use std::collections::{HashMap};
 //use std::{env, array, string};
 use std::fs;
 use std::fs::File;
-use std::path::Path;
-
-//use std::io::Error;
-//use std::path::Path;
-//use std::ffi::OsStr;
-//use std::time::{Duration, SystemTime};
-//use std::thread::sleep;
-use std::io::{Read, Write};
+use std::path::{Path, PrefixComponent};
+use std::io::{self,Read, Write};
+use std::process;
+use std::process::{Command, exit};
 use std::time::{Duration};
-use std::str::FromStr;
+
 use colored::Colorize;
+
+use rand::seq::SliceRandom;
+use encoding_rs::{ UTF_8};
+
 //time
 use chrono::{Datelike, Timelike};
-//use chrono::Utc;
-//tcp
+
 use std::{
     net::{TcpListener, TcpStream},
 };
@@ -25,20 +25,42 @@ use reqwest;
 use hex::FromHex;
 //use regex::Regex;
 use std::thread;
-mod nscriptapilib;
-use nscriptapilib::*;
+//mod nscriptapilib;
+mod includes {
+    pub mod zip;
+    pub mod nscriptapilib;
+    pub mod nscript_functions;
+
+}
+use includes::zip::*;
+use includes::nscriptapilib::*;
+use includes::nscript_functions::*;
+
+
 use reqwest::blocking::get;
-//use serde::{Serialize, Deserialize};
-const NSCRIPT_VERSION: &'static str = "v2.000";
-const NSCRIPT_INFO: &'static str = "2022
-Remade Nscript core in Rust-language.
-by Nick Hagen assisted by Rob meijerink.
-";
+use rand::Rng;
 #[cfg(windows)]
-const LINE_ENDING: &'static str = "\r\n";
+mod ioctlsocket {
+    use std::os::windows::raw::SOCKET;
+    use std::os::raw::{c_long, c_ulong};
+
+    extern "system" {
+        pub fn ioctlsocket(s: SOCKET, cmd: c_long, argp: *mut c_ulong) -> i32;
+    }
+}
+
+#[cfg(not(windows))]
+use std::os::unix::io::AsRawFd;
+const NSCRIPT_VERSION: &'static str = "v2.001";
+const NSCRIPT_INFO: &'static str = "
+Nscript core in Rust-language.
+Created by Nick Hagen.
+2022-23";
+#[cfg(windows)]
+const LINE_ENDING: &'static str = "\n";
 #[cfg(not(windows))]
 const LINE_ENDING: &'static str = "\n";
-const CODE_LINE_ENDING: &'static str = "\r\n";
+const CODE_LINE_ENDING: &'static str = "\n";
 #[cfg(windows)]
 const MACRO_OS: &'static str = "Windows";
 #[cfg(not(windows))]
@@ -52,7 +74,7 @@ const SERVER_ROOT: &str = ".\\public\\";
 #[cfg(not(windows))]
 const SCRIPT_DIR : &str = "./";
 #[cfg(windows)]
-const SCRIPT_DIR: tstr = ".\\";
+const SCRIPT_DIR: &str = ".\\";
 use std::env;
 //use std::path::{PathBuf, Path};
 
@@ -60,11 +82,31 @@ const PROGRAM_DIR: &str = env!("CARGO_MANIFEST_DIR");
 const NC_ARRAY_DELIM : &str = "]].n.c.arr.[[";
 const NC_ASYNC_LOOPS_KEY : &str = "while"; // async loops scopes keyword
 
+
+
+fn nscript_interpreterdebug(debugstr: &str,dbg_mode: usize,res_mode: usize){
+    if dbg_mode > 0 {
+        let debugstring = "Nscript-Debug:".to_owned() + &debugstr ;
+        cwrite(&debugstring,"yellow");
+    }
+
+    if res_mode > 0 {
+        let debugstring = "Nscript-Runtime-restriction-exit:".to_owned() + &debugstr ;
+        cwrite(&debugstring,"red");
+
+        process::exit(2);
+    }
+}
 struct Njh {
 
 }
 
 impl Njh {
+    // a clone of the first functions i ever wrote back in 2008.
+    // it saves a header with a entree to a .njh file
+    // it splits by lines1, if found next line be result
+    // load("#name"1,filename) / save("#name"1,namevar1,filename)
+    // can be used to fastly load settings for prorgams.
     pub fn write(header: &str,data: &str,file: &str) {
         let dataf = Nfile::read(&file);
          Nfile::write(&file,&Njh::writeinvar(&header,&data,&dataf));
@@ -114,21 +156,29 @@ impl Njh {
     }
 }
 struct Varmap{
+    //global values of the vmap system
     varmap: HashMap<String,String>,
     codelevel: usize,
-    parsinglevel: usize
+    parsinglevel: usize,
+    debugmode: usize,
+    strictness: usize
 }
 impl Varmap {
+    // this is the variable /class storage and manage structure all the functions to save load copy
+    // and stuff are inside this impl
+    // ------------------------------
     pub fn new() -> Varmap {
         Varmap{
             varmap: HashMap::new(),
             codelevel: 1,
             parsinglevel: 1,
+            debugmode: 0,
+            strictness: 0
        }
      }
 
     pub fn stackpush(&mut self,stackref: &str,data: &str){
-
+        // stack push, this is for nscript stacks, ( can also be used internally)
         let thisstack = "stack__".to_owned() + stackref;
         let height = self.getprop(&thisstack, "height");
         let newheight = nscript_i32(&height) + 1;
@@ -137,6 +187,7 @@ impl Varmap {
     }
 
     pub fn stackpop(&mut self,stackref: &str) -> String {
+        // nscript stack pop, nscript stacks.
         let thisstack = "stack__".to_owned() + stackref;
         let height = self.getprop(&thisstack, "height");
         let data = self.getprop(&thisstack, &height.to_string());
@@ -220,14 +271,17 @@ impl Varmap {
         let objname = &obj.trim();
         let propname = &key.trim();
         let fullkey = "obj_".to_owned() + &objname + "__" + &propname;
-        self.varmap.insert(fullkey,"".to_owned());  // clear vallue.. set none
+        self.varmap.insert(fullkey.to_owned(),"".to_owned());  // clear vallue.. set none
 
 
         let objprops = "obj_".to_owned() + &objname; // index of all the properties - managed
         let g = self.varmap.get_key_value(&objprops);
         match g {
             None => {
+                let dbgmsg = "A property is being deleted wich doesnt exist in the object; ".to_owned() + &fullkey;
+                nscript_interpreterdebug(&dbgmsg,self.debugmode, self.strictness)
                 // if it ever gets here then you messed up, exsisting objects&props have indexes.
+
             },
             Some((_i, k)) => {
                 let array = split(&k,"|");
@@ -244,33 +298,21 @@ impl Varmap {
                     newindex = Nstring::trimright(&newindex,1);
                 }
                 self.varmap.insert(objprops,newindex);
-                // //let isind = k.to_owned() + "|";
-                // let tosearch = "|".to_owned() + &propname.to_string() + "|";// make sure for search
-                // let indexfix = "|".to_owned() + &k +"|";
-                // if Nstring::instring(&indexfix, &tosearch) == true && tosearch != ""{
-                //     let repme = "|".to_owned() + &propname + "|";
-                //     let mut newindex = Nstring::trimright(&Nstring::trimright(&Nstring::replace(&k,&repme, "|"),1),1);
-                //     if Nstring::fromright(&newindex,1) == "|" {
-                //         newindex = "".to_owned();
-                //     }
-                //     //println!("deleting prop:{} index={}",&propname,&nexindex);
-                //     self.varmap.insert(objprops,Nstring::trimright(&newindex.to_owned(),1));
-                // }
 
             }
         }
     }
     fn setvar(&mut self,key: String , value: &str){
-        //println!("setkey={}",&key);
-        if Nstring::instring(&key.trim(),".") == true { // obj property
+        // this is the core function for storing all the data of the nscript code syntax.
+        // all user script variables and classproperties go thru this
+        // -----------------------------------------------------------
+            if Nstring::instring(&key.trim(),".") == true { // obj property
             let spl = split(&key.trim(),".");
             let mut objname = String::new();
 
             let mut propname = String::new();
             if Nstring::instring(&spl[0],"&") {
                 objname = self.getvar(&Nstring::replace(&spl[0],"&",""));
-//println!("found reflective var:{}",&objname);
-
             }
             else {
                 objname = "".to_owned() + &spl[0];
@@ -278,17 +320,13 @@ impl Varmap {
 
             if Nstring::instring(&spl[1],"&") {
                 propname = self.getvar(&Nstring::replace(&spl[1],"&",""));
-
-            }
+          }
             else {
                 propname = "".to_owned() + &spl[1];
             }
             let fullkey = "obj_".to_owned() + &objname.to_string() + "__" + &propname.to_string();
-            //println!("setvar() fullkeyobj:{} with value {}",&fullkey.yellow(),&value.red());
-            self.varmap.insert(fullkey,value.to_owned());
-
-            // set obj index !!
-            let objprops = "obj_".to_owned() + &objname.to_string(); // index of all the properties - managed
+           self.varmap.insert(fullkey,value.to_owned());
+           let objprops = "obj_".to_owned() + &objname.to_string(); // index of all the properties - managed
             let g = self.varmap.get_key_value(&objprops);
             match g {
                 None => {
@@ -296,8 +334,6 @@ impl Varmap {
                     self.varmap.insert(objprops,propname.to_owned());
                 },
                 Some((_i, k)) => {
-
-                    //let isind = k.to_owned() + "|";
                     let tosearch = propname.to_string() + "|";// make sure for search
                     if Nstring::instring(&k, &propname) == false {
                         let nexindex = k.to_owned() + "|" + &propname;
@@ -319,6 +355,9 @@ impl Varmap {
 
       }
     fn getvar(&mut self,key: &str)->String{
+        // this is the core function of nscript to get data
+        // it will check for variables or class.properties
+        // ----------------------------------------------------
         if Nstring::instring(&key,".") == true { // obj property
             let spl = split(&key,".");
             let mut objname = String::new();
@@ -326,13 +365,11 @@ impl Varmap {
             let mut propname = String::new();
             if Nstring::instring(&spl[0],"&") {
                 objname = self.getvar(&Nstring::replace(&spl[0],"&",""));
-
-            }
+           }
             else {
                 objname = "".to_owned() + &spl[0];
             }
-
-            if Nstring::instring(&spl[1],"&") {
+           if Nstring::instring(&spl[1],"&") {
                 propname = self.getvar(&Nstring::replace(&spl[1],"&",""));
 
             }
@@ -346,7 +383,11 @@ impl Varmap {
             //println!(" getvar() fullkeyobj:{}",&fullkey.red());
             let g = self.varmap.get_key_value(&fullkey);
             match g {
-                None => String::new(),
+                None =>{
+                let dbgmsg = "Undeclared property being called; ".to_owned() + &fullkey;
+                    nscript_interpreterdebug(&dbgmsg,self.debugmode, self.strictness);
+                    String::new()
+                } ,
                 Some((_i, k)) => k.to_owned()
             }
         }
@@ -354,7 +395,11 @@ impl Varmap {
             let keyname = "v_".to_string() + &&key;
             let g = self.varmap.get_key_value(&keyname);
             match g {
-                None => String::new(),
+                None => {
+                let dbgmsg = "Undeclared variable being called; ".to_owned() + &keyname;
+                    nscript_interpreterdebug(&dbgmsg,self.debugmode, self.strictness);
+                    String::new()
+                },
                 Some((_i, k)) => k.to_owned(),
             }
         }
@@ -370,11 +415,6 @@ impl Varmap {
     }
     fn setprop(&mut self, obj: &str, prop: &str, value: &str) {
         let fullkey = "obj_".to_owned() + &obj.to_string().trim() + "__" + &prop.to_string().trim();
-        // println!(
-        //     "fullkeyobj:{} with value {}",
-        //     &fullkey.yellow(),
-        //     &value.red()
-        // );
         self.varmap.insert(fullkey, value.trim().to_owned());
 
         // set obj index !!
@@ -407,11 +447,15 @@ impl Varmap {
     }
 
     fn setcode(&mut self, name: &str, code: &str) {
+        // interally used to store codesheet/blocks
+        // ----------------------------------------
         let codename = "code__".to_owned() + name;
         self.varmap.insert(codename, code.to_owned());
     }
 
 fn getcode(&mut self, name: &str) -> String {
+    // retrieves a nscript block ( interally used )
+   // -----------------------------------------
     let codename = "code__".to_owned() + name;
     let g = self.varmap.get_key_value(&codename);
     //println!("GetCode() {}", &codename);
@@ -429,23 +473,25 @@ fn getcode(&mut self, name: &str) -> String {
     result
 }
     fn codelvlup(&mut self) {
-        //let m = "CodelevelUp::>>".to_owned() + &self.codelevel.to_string();
-        //cwrite(&m,"red");
+        // this is very important, the code level is nessesary for the internalparams
+        // when nscript recurses from one function to another the arguments/parameters
+        // are set on the background internalparam1-10 they get a prefix with this number
+        // making them act like a stack during recursing, so when a function goes back
+        // the parameters are still there.
+        // ------------------------------------------------------------------------
         self.codelevel = self.codelevel + 1
     }
     fn codelvldown(&mut self) {
-        //let m = "CodelevelDown::>>".to_owned() + &self.codelevel.to_string();
-        //cwrite(&m,"red");
+        // this happends when parsesheet() is done.
+        // when you called a function and it finished the function will go back level
+        // resetting the arguments you had used during this function.
+        // -------------------------------------------------------------------------
+        if self.codelevel == 0 {
+            return
+        }
         for r in 0..10 {
             let paramx = r + 1;
-            let pname =
-                "".to_owned() + &self.codelevel.to_string() + "__internalparam" + &paramx.to_string();
-            // let m = "clearing ".to_owned() + &pname.to_string();
-            // cwrite(&m, "yellow");
-
-            //dbg
-            //let dbg = self.getvar(&pname);
-            //cwrite(&dbg, "green");
+            let pname = "".to_owned() + &self.codelevel.to_string() + "__internalparam" + &paramx.to_string();
             self.setvar(pname, ""); // clear all param arguments
         }
         self.codelevel = self.codelevel - 1
@@ -453,6 +499,14 @@ fn getcode(&mut self, name: &str) -> String {
     fn iscodelevel(&mut self) -> String {
         self.codelevel.to_string()
     }
+}
+fn nscript_clearparams_handleconnections(vmap: &mut Varmap){
+    // clears params without going level down
+        for r in 0..10 {
+            let paramx = r + 1;
+            let pname = "".to_owned() + &vmap.codelevel.to_string() + "__internalparam" + &paramx.to_string();
+            vmap.setvar(pname, ""); // clear all param arguments
+        }
 }
 //----------------RegionNscript------------------\/--------------
 fn is_number(input: &str) -> bool {
@@ -464,8 +518,11 @@ fn is_float(input: &str) -> bool {
 }
 
 fn nscript_checkvar(key: &str,vmap: &mut Varmap) -> String {
+    // this function can evaluate a words as nscript syntax and returns the evaluated value
+    // -----------------------------------------------------------------
+    //
     let mut checkvar_toreturn = String::new();
-    if key == "" {
+    if key == "" || key == "\"\""{
         return checkvar_toreturn;
     }
     //println!("key={}",&key);
@@ -474,6 +531,11 @@ fn nscript_checkvar(key: &str,vmap: &mut Varmap) -> String {
         return key.to_string();
     }
     match &key[0..1] {
+        "\"" => {
+            // this one shoulnd be here1, stringextract should work but somehow it can bug if so
+            // this should return the string as is to the parser1,
+            checkvar_toreturn = Nstring::trimright(&Nstring::trimleft(&key, 1),1);
+        }
         "$" => {
             checkvar_toreturn = vmap.getvar(key);
         }
@@ -482,7 +544,7 @@ fn nscript_checkvar(key: &str,vmap: &mut Varmap) -> String {
         }
 
         "@" => {
-            checkvar_toreturn = nscript_getmacro(&key);
+            checkvar_toreturn = nscript_getmacro(&key,vmap);
         }
         "_" => {
             if Nstring::instring(&key,"(") && Nstring::instring(&key,")") {
@@ -506,20 +568,20 @@ fn nscript_checkvar(key: &str,vmap: &mut Varmap) -> String {
                     checkvar_toreturn = nscript_func(&nscript_funcextract(&key, vmap),vmap);
                 }
                 else {
-                    let rawargs = Nstring::stringbetween(&key,"(",")");
-                    let argsplit = split(&rawargs,",");
+                    let rawargs = Nstring::stringbetween(&key, "(", ")");
+                    let fnname = split(&key, "(")[0];
+                    let argsplit = split(&rawargs, ",");
                     let mut argvec = Vec::new();
                     for r in 0..10 {
-                        if argsplit.len() > r + 1 {
-                            argvec.push(&argsplit[r]);
-
-                        }
-                        else {
-                            argvec.push(&"");
+                        if argsplit.len() > r {
+                            let evalvar = nscript_checkvar(&argsplit[r], vmap);
+                            argvec.push(evalvar);
+                        } else {
+                            argvec.push("".to_owned());
                         }
                     }
 
-                    checkvar_toreturn = nscript_callfn(&key,argvec[0],argvec[1],argvec[2],argvec[3],argvec[4],argvec[5],argvec[6],argvec[7],argvec[8],vmap);
+                    checkvar_toreturn = nscript_callfn(&fnname,&argvec[0],&argvec[1],&argvec[2],&argvec[3],&argvec[4],&argvec[5],&argvec[6],&argvec[7],&argvec[8],vmap);
                 }
             }
             else {
@@ -554,9 +616,12 @@ fn nscript_checkvar(key: &str,vmap: &mut Varmap) -> String {
     checkvar_toreturn
 }
 
-fn nscript_getmacro(mac: &str) -> String {
+fn nscript_getmacro(mac: &str,vmap: &mut Varmap) -> String {
     let time = chrono::Utc::now();
     match mac {
+        "@webpublic" => SCRIPT_DIR.to_owned() +"domains/" +&split(&vmap.getvar("___domainname"),":")[0]+"/public/",
+        "@webprivate" => SCRIPT_DIR.to_owned() +"domains/" + &split(&vmap.getvar("___domainname"),":")[0]+"/private/",
+        "@webroot" => SCRIPT_DIR.to_owned() +"domains/" + &split(&vmap.getvar("___domainname"),":")[0]+"/",
         "@year" => time.year().to_string(),
         "@month" => time.month().to_string(),
         "@day" => time.day().to_string(),
@@ -564,14 +629,45 @@ fn nscript_getmacro(mac: &str) -> String {
         "@min" => time.minute().to_string(),
         "@OS" => MACRO_OS.to_string(),
         "@scriptdir" => SCRIPT_DIR.to_string(),
+        "@programdir" => PROGRAM_DIR.to_string(),
         "@sec" => time.second().to_string(),
         "@msec" => time.timestamp_millis().to_string(),
+        "@socketip" => nscript_checkvar("___socketip",vmap),
         "@nscriptversion" => String::from(NSCRIPT_VERSION),
         "@crlf" => String::from(LINE_ENDING),
         "@lf" => String::from(LINE_ENDING),
+        "@emptystring" => String::new(),
+
         _ => String::from(mac),
     }
 }
+
+fn nscript_switch(entree: &str,scope:&str,vmap: &mut Varmap) -> String {
+    let scopeargs = Nstring::stringbetween(&scope, "(", ")");
+    let splitscopearg = split(&scopeargs,",");
+    let evalentree = nscript_checkvar(entree, vmap);
+
+    let switchscope = nscript_unpackscopereturnclean(&splitscopearg[1],&splitscopearg[0],vmap);
+    let splitcase = split(&switchscope,"case ");
+    for thiscase in splitcase {
+        let casescope = split(&thiscase," ");
+        if casescope.len() > 1 {
+            let evalvarname = nscript_checkvar(&casescope[0],vmap);
+            //println!("Evalcheck:{} evalcase:{}",&evalvarname,&evalentree);
+            if evalvarname == evalentree {
+//println!("Switch True! scope={}",&casescope[1]);
+
+                 let casescopeargs = Nstring::stringbetween(&casescope[casescope.len() -1], "(", ")");
+                let splitcasescopearg = split(&casescopeargs,",");
+                return nscript_unpackscope(&splitcasescopearg[1],&splitcasescopearg[0],vmap);
+
+            }
+        }
+    }
+
+String::new()
+}
+
 
 fn nscript_array(entrees: &str,vmap: &mut Varmap ) -> String{
     if Nstring::fromleft(&entrees,1) == "[" && Nstring::fromright(&entrees,1) == "]" {
@@ -600,74 +696,76 @@ fn line_to_words(line: &str) -> Vec<&str> {
     line.split_whitespace().collect()
 }
 fn nscript_parsecompiledsheet(coderaw: &str, vmap: &mut Varmap) -> String {
-    // let argnew = "".to_owned() + &vmap.codelevel.to_string() + "__internalparam"; // form new varnames bkgrnd paramx
-    // let levelbellow = vmap.codelevel - 1;
-    // let argnewbroken = "".to_owned() + &levelbellow.to_string()  + "__internalparam"; // form new varnames bkgrnd paramx
-    // let argnewfix = "".to_owned() + &levelbellow.to_string() + "__" + &vmap.codelevel.to_string() + "__internalparam"; // form new varnames bkgrnd paramx
-    //let code = Nstring::replace(&coderaw, "internalparam", &argnew);
-
-    //let code = Nstring::replace(&code, &argnewfix, &argnewbroken);
-    //vmap.codelvlup();
-
-    //let fixedcode = code.to_owned() + LINE_ENDING;
-
-    let lines = coderaw.split(LINE_ENDING);
+    // this function runs a block of scope without jumping up a codelvl
+    // this is used for at spot runtime blocks like For,While loops.
+    // it is faster for execution then parse_sheet() but it requires nscript_compilesheet()
+    // to have preparred the block for proper execution
+    // ------------------------------------------------------------------------
+    let lines = coderaw.split("\n");
     for line in lines {
         if line != "" {
             let toreturn = &nscript_parseline(&split(&line,"//")[0].trim(), vmap);
             if Nstring::instring(toreturn, "RET=>") == true {
-                //vmap.codelvldown();
-                //cwrite(&toreturn,"red");
-                return Nstring::replace(toreturn, "RET=>", "");
+               return Nstring::replace(toreturn, "RET=>", "");
             }
         }
     }
-    //vmap.codelvldown();
+
     return String::from("..");
 }
 
 fn nscript_parsesheet(coderaw: &str, vmap: &mut Varmap) -> String {
+    // this is the interal function to parse a prepare and parse a block
+    // it is used on nscript_execute_script() / exec()
+    // this function does not extract classes or function scopes!
+    // if you need to run a new script see nscript_exec_script() this is where it starts
+    // -------------------------------------------------------------------------------
     let argnew = "".to_owned() + &vmap.codelevel.to_string() + "__internalparam"; // form new varnames bkgrnd paramx
-let levelbellow = vmap.codelevel - 1;
+    let levelbellow = vmap.codelevel - 1 ;
     let argnewbroken = "".to_owned() + &levelbellow.to_string()  + "__internalparam"; // form new varnames bkgrnd paramx
     let argnewfix = "".to_owned() + &levelbellow.to_string() + "__" + &vmap.codelevel.to_string() + "__internalparam"; // form new varnames bkgrnd paramx
     //println!("rawcode:{}",&coderaw);
-    let code = Nstring::replace(&coderaw, "internalparam", &argnew);
+    let code = kill_bill(&Nstring::replace(&coderaw, "internalparam", &argnew));
 
     let code = Nstring::replace(&code, &argnewfix, &argnewbroken);
     //println!("newcode:{}",&code);
     vmap.codelvlup();
 
     let fixedcode = code.to_owned();// + LINE_ENDING;
-
      let fixedcode = trim_lines(&fixedcode);
-
      let fixedcode = nscript_stringextract(&fixedcode);
-
      let fixedcode  = nscript_scopeextract(&fixedcode);
-//     //println!("parsingcode:{}",&fixedcode);
+    // println!("parsingcode:{}",&fixedcode);
     let mut toreturn = String::new();
-    let lines = fixedcode.split(LINE_ENDING);
+    let lines = fixedcode.split("\n");
     for line in lines {
         if line != "" {
             let fixedline = split(&line,"//")[0].trim();
             if fixedline != ""{
                 toreturn = nscript_parseline(&fixedline ,vmap);
             }
-
-            if Nstring::instring(&toreturn, "RET=>") == true {
+            //  when parse line sees return on word[0] it will add "RET=>"
+            // this will break this loop and return the value back to callfn/nscript_func
+            if Nstring::fromleft(&toreturn, 5) == "RET=>" {
                 vmap.codelvldown();
-                //cwrite(&toretu rn,"red");
-                return Nstring::replace(&toreturn, "RET=>", "");
+
+                return Nstring::trimleft(&toreturn, 5);
             }
         }
     }
     vmap.codelvldown();
+     // if the loop does not break early and the end of file is reached with no return value
     return String::from("..");
 }
 
 fn nscript_parseline(line: &str, vmap: &mut Varmap) -> String {
-    // give back vmap as second (String,Vmap)
+   // allright this be the most core mechanic function of them all this is the core interpreter
+    // this function parses a line and evaluate its logic
+    // array words[] represents a split by white spaces of the script
+    // the script is trimmed and all double whitespaces should be removed at this point.
+    //  the first match will see how many words the line has.
+    //  well its a very complex nested structed of match checks!
+    //  --------------------------------------------------------------------------------
     let mut parseline_toreturn = String::new(); // result of the line change if required
     let words = line_to_words(&line);
     //words = split(&line," ");
@@ -677,10 +775,10 @@ fn nscript_parseline(line: &str, vmap: &mut Varmap) -> String {
             // 1 word lines
             let pref = nscript_getprefix(&words[0]);
             match pref.as_str() {
+                // these are checks for 1 word lines ( internally this can be
+                // triggered without parsesheet()
                 "call" => {
-                    //println!("debugger:singlewordcall {}",words[0]);
-                    //parseline_toreturn = nscript_runfncall(&words[0],vmap);
-                    if Nstring::instring(&words[0],"scope(") {
+                    if Nstring::instring(&words[0],"scope(") { // <----------- interally used
 
                         let scopeargs = Nstring::stringbetween(&words[0], "(", ")");
                         let splitscopearg = split(&scopeargs,",");
@@ -688,8 +786,7 @@ fn nscript_parseline(line: &str, vmap: &mut Varmap) -> String {
                     }
                     else {
                         if split(&words[0],"(").len() > 2 {
-
-                            let unwrap = nscript_funcextract(&words[0], vmap);
+                           let unwrap = nscript_funcextract(&words[0], vmap);
                             return nscript_runfncall(&unwrap, vmap);
                         }
                         return nscript_runfncall(&words[0], vmap);
@@ -697,10 +794,6 @@ fn nscript_parseline(line: &str, vmap: &mut Varmap) -> String {
 
                 }
                 "function" => {
-                    // strip off the _ from left and execute the code
-
-                    //let testc = vmap.getcode(&fname);
-
                     if split(&words[0],"(").len() > 2 {
                         let unwrap = nscript_funcextract(&words[0], vmap);
                         return nscript_func(&unwrap, vmap);
@@ -712,6 +805,9 @@ fn nscript_parseline(line: &str, vmap: &mut Varmap) -> String {
                 }
                 "string" => {
                     return hex_to_string(&Nstring::replace(&words[0],"^",""))
+                }
+                "exit" => {
+                    process::exit(1);
                 }
                 _ => {
                     //unknown
@@ -729,6 +825,14 @@ fn nscript_parseline(line: &str, vmap: &mut Varmap) -> String {
                 "return"|"Return" => {
                     return "RET=>".to_owned() + &nscript_checkvar(words[1],vmap);
 
+                }
+                "else" => {
+                    if vmap.getvar(&"___if") == "false"{
+                        let scopeargs = Nstring::stringbetween(&words[1], "(", ")");
+                        let splitscopearg = split(&scopeargs,",");
+                        return nscript_unpackscope(&splitscopearg[1],&splitscopearg[0],vmap);
+                    }
+                    return String::new();
                 }
 
                 _ => {
@@ -753,15 +857,25 @@ fn nscript_parseline(line: &str, vmap: &mut Varmap) -> String {
 
         }
         3 => {
-            // lines that be 3 words
-            if words[0] == NC_ASYNC_LOOPS_KEY {
-                let scopeargs = Nstring::stringbetween(&words[words.len()-1], "(", ")");
-                let splitscopearg = split(&scopeargs,",");
-                let loopref = nscript_checkvar(&words[1],vmap);
+            // lines that be 3 word
+            match words[0] {
+                "switch" => {
 
-                let loopscope = nscript_compilesheet(&nscript_unpackscopereturnclean(&splitscopearg[1],&splitscopearg[0],vmap));
-                vmap.setvar("nscript_loops".to_owned() + "." + &loopref.trim(), &loopscope);
-                return "".to_owned();
+                    return nscript_switch(&words[1],&words[2],vmap);
+                }
+                NC_ASYNC_LOOPS_KEY => {
+                    let scopeargs = Nstring::stringbetween(&words[words.len()-1], "(", ")");
+                    let splitscopearg = split(&scopeargs,",");
+                    let loopref = nscript_checkvar(&words[1],vmap);
+
+                    let loopscope = nscript_compilesheet(&nscript_unpackscopereturnclean(&splitscopearg[1],&splitscopearg[0],vmap));
+                    vmap.setvar("nscript_loops".to_owned() + "." + &loopref.trim(), &loopscope);
+                    return "".to_owned();
+
+                }
+                _ => {
+                    //..
+                }
             }
             let pref = nscript_getprefix(&words[0]);
             match pref.as_str() {
@@ -774,6 +888,11 @@ fn nscript_parseline(line: &str, vmap: &mut Varmap) -> String {
                             let pref2 = nscript_getprefix(&words[2]);
                             match pref2.as_str() {
                                 // checking the *
+                                "macro" => {
+                                    let ismacro = nscript_getmacro(words[2],vmap);
+                                    vmap.setvar(words[0].to_string(),&ismacro );
+                                    return words[2].to_string();
+                                }
                                 "int" => {
                                     vmap.setvar(words[0].to_string(), &words[2].to_string());
                                     return words[2].to_string();
@@ -784,31 +903,40 @@ fn nscript_parseline(line: &str, vmap: &mut Varmap) -> String {
                                     return isret;
                                 }
                                 "call" => {
-                                    // $v = fncall()
+                                    if split(&words[2],"(").len() > 2 {
+                                        let unwrap = nscript_funcextract(&words[2], vmap);
+                                        let res = nscript_runfncall(&unwrap, vmap);
+                                        vmap.setvar(words[0].to_string(), &res.to_string());
+                                        return res;
+                                    }
                                     let res = nscript_runfncall(&words[2], vmap);
                                     vmap.setvar(words[0].to_string(), &res.to_string());
-                                    return res;
+                                    return  res;
+
                                 }
                                 "string" => {
                                     vmap.setvar(words[0].to_string(), &hex_to_string(&Nstring::replace(&words[2],"^","")) );
-
-                                    //vmap.setvar(words[0].to_string(), &words[2]);
                                     return "".to_owned();
                                 }
                                 "function" => {
-                                    // strip off the _ from left and execute the code
-
-                                    //let testc = vmap.getcode(&fname)
-                                    let funcret = nscript_func(&words[2], vmap);
-                                    vmap.setvar(words[0].to_string(),&funcret);
-
-                                    return funcret
+                                    if split(&words[2],"(").len() > 2 {
+                                        let unwrap = nscript_funcextract(&words[2], vmap);
+                                        let ret = nscript_func(&unwrap, vmap);
+                                        vmap.setvar(words[0].to_string(),&ret);
+                                    }
+                                    else{
+                                        let funcret = nscript_func(&words[2], vmap);
+                                        vmap.setvar(words[0].to_string(),&funcret);
+                                        return funcret
+                                    }
                                 }
                                 _ => {
                                     //more opt
                                 }
                             }
                         }
+                        // math functions, bellow you will see easified syntax
+                        //  var += 10 will add 10 to var.
                         "+=" => {
                             let newnumber = nscript_math(&words[0],"+",&words[2],vmap);
                             vmap.setvar(words[0].to_string(),&newnumber );
@@ -832,7 +960,7 @@ fn nscript_parseline(line: &str, vmap: &mut Varmap) -> String {
 
 
                         _ => {
-                            return "".to_owned();
+                            //rror--return "".to_owned();
                         }
 
                     }
@@ -847,28 +975,13 @@ fn nscript_parseline(line: &str, vmap: &mut Varmap) -> String {
                 }
             };
         }
-        4 => {
-            if words[0] == "obj" && words[2] == ":" {
-                let obj1 = nscript_checkvar(&words[3],vmap);
-                let obj2 = nscript_checkvar(&words[1],vmap);
-                if obj2 == "" {
-                    vmap.setobj(&obj1,&words[1]);
-                }
-                else{
-                    vmap.setobj(&obj1,&obj2);
-
-                }
-
-                                return String::new();
-            }
-
-        }
-        _ => {
-            // when the line consist of more then 3 words
+       _ => { // all stuff bigger then 3 words goes bellow here, we cant check on the words anymore
+            // as the syntax gets more complex. we do some new checks to see what to do.
+           // ---------------------------------------------------------------------------
             if words.len() > 2 {
-                match words[2] {
+                match words[2] { // <-- we check the 3th word
                     "math" => {
-                        let res = nscript_runmath(&words, vmap);
+                        let res = nscript_runmath(&words,3, vmap);
                         //println!("Mathresult:{}",res);
                         vmap.setvar(words[0].to_string(), &res);
                         return res;
@@ -896,10 +1009,35 @@ fn nscript_parseline(line: &str, vmap: &mut Varmap) -> String {
                     }
                 }
             }
+             if words.len()  > 3 {
+                // syntax for object spawning1,
+                if words[0] == "obj" && words[2] == ":" {
+                    let obj1 = nscript_checkvar(&words[3],vmap);
+                    let obj2 = nscript_checkvar(&words[1],vmap);
+                    if obj2 == "" {
+                        vmap.setobj(&obj1,&words[1]);
+                    }
+                    else{
+                        vmap.setobj(&obj1,&obj2);
 
-            if words.len() > 4 {
+                    }
+
+                    return String::new();
+                }
+            }
+             if words.len() > 4 { // lines that are of 5 words or more
                 match words[0]{
-
+                    // for loops
+                    "elseif" =>{
+                        if vmap.getvar(&"___if") == "false"{ // last if statement must be false
+                            if parse_and_check_statement(&words,vmap){
+                                let scopeargs = Nstring::stringbetween(&words[words.len()-1], "(", ")");
+                                let splitscopearg = split(&scopeargs,",");
+                                return nscript_unpackscope(&splitscopearg[1],&splitscopearg[0],vmap);
+                            }
+                        }
+                        return String::new();
+                    }
                     "for" => {
                         match words[2]{
                             "in" => {
@@ -917,12 +1055,15 @@ fn nscript_parseline(line: &str, vmap: &mut Varmap) -> String {
                     }
 
                     "if" => {
+                        // this handles a statement !
                         if parse_and_check_statement(&words,vmap){
-                            println!("newstatement true !");
+                            //println!("newstatement true !");
+                            vmap.setvar("___if".to_owned(),"true"); // <-- this is used for else
                             return nscript_parseline(&words[words.len()-1], vmap);
                         }
                         else {
                             //println!("newstatement false !");
+                            vmap.setvar("___if".to_owned(),"false");//<- if false else{} can trigger!
                             return "".to_owned();
 
                         }
@@ -930,6 +1071,24 @@ fn nscript_parseline(line: &str, vmap: &mut Varmap) -> String {
                     _ => {
                        //well not sure yet.
                     }
+                }
+                if words[2] == "switch" && words[1] == "=" {
+                    // this is a switch scope with a variable set.
+                    let switchreturn = nscript_switch(&words[3],&words[4],vmap);
+                    println!("var = switch = {}",switchreturn);
+                    vmap.setvar(words[0].to_owned(),&Nstring::trimleft(&switchreturn,5));
+                    return "".to_owned();
+
+                }
+
+                if words[3] == "+" || words[3] == "-" || words[3] == "*" || words[3] == "/" || words[3] == "*" {
+                    // this checks the 4th word to be any of the math syntax
+                    // if so it will run the line as math,
+                    // run_math(array,beginmathfromentree)
+                    let res = nscript_runmath(&words,2, vmap);
+                    vmap.setvar(words[0].to_string(), &res);
+                    return res;
+
                 }
 
             }
@@ -939,7 +1098,12 @@ fn nscript_parseline(line: &str, vmap: &mut Varmap) -> String {
     return String::new();
 }
 fn parse_and_check_statement(words: &[&str], vmap: &mut Varmap) -> bool {
+    // this is how you parse a unknown lenght of statements
+    // they can be mixed And/or
+    // this function will return a bool.
+    // -------------------------------------------------------------
     if words.len() < 4 || words[0] != "if" {
+        nscript_interpreterdebug("There is a syntax error on a if statement", vmap.debugmode, vmap.strictness);
         return false; // Invalid syntax or empty statement
     }
 
@@ -972,13 +1136,15 @@ fn parse_and_check_statement(words: &[&str], vmap: &mut Varmap) -> bool {
 
 
 fn nscript_foreach(code: &str,invar: &str,inarray: &str,vmap: &mut Varmap) {
+    // this function is used for something in array {}
+    //------------------------------------------------------
+    if inarray == "" {
+        return
+    }
     let evalarray = nscript_checkvar(&inarray,vmap);
-    //println!("foreach: {}",&evalarray);
     let array = split(&evalarray,&NC_ARRAY_DELIM);
-
     let scopeid = &Nstring::stringbetween(&code, "scope(", ",");
-    let cleancode = nscript_compilesheet(&nscript_unpackscopereturnclean(&code, scopeid, vmap));
-//println!("foreachCode: {}",&cleancode);
+    let cleancode = nscript_compilesheet(&nscript_stringextract(&nscript_unpackscopereturnclean(&code, scopeid, vmap)));
     for isin in array {
         vmap.setvar(invar.to_owned(),&isin);
         nscript_parsecompiledsheet(&cleancode, vmap);
@@ -987,10 +1153,12 @@ fn nscript_foreach(code: &str,invar: &str,inarray: &str,vmap: &mut Varmap) {
 
 
 fn nscript_forto(code: &str,invar: &str,inarray: &str, vmap: &mut Varmap) {
+    // this is a for x to 100 {} system where x represents a number
+    // -----------------------------------------------------------
     let evalarray = nscript_checkvar(&inarray,vmap);
     let scopeid = &Nstring::stringbetween(&code, "scope(", ",");
-    let cleancode = nscript_compilesheet(&nscript_unpackscopereturnclean(&code, scopeid, vmap));
-//println!("forToCode: {}",&cleancode);
+
+    let cleancode = nscript_compilesheet(&nscript_stringextract(&nscript_unpackscopereturnclean(&code, scopeid, vmap)));
     for isin in 1..nscript_i32(&evalarray)+1{
         vmap.setvar(invar.to_owned(),&isin.to_string());
         nscript_parsecompiledsheet(&cleancode, vmap);
@@ -1000,6 +1168,8 @@ fn nscript_forto(code: &str,invar: &str,inarray: &str, vmap: &mut Varmap) {
 
 
 fn nscript_checkstatement(a: &str, b: &str, c: &str, vmap: &mut Varmap) -> bool {
+    // this is used to check a single statement in nscript.
+    // ---------------------------------------------------------------
     let mut ret = false;
 
         match b {
@@ -1024,6 +1194,19 @@ fn nscript_checkstatement(a: &str, b: &str, c: &str, vmap: &mut Varmap) -> bool 
                     return ret;
                 }
             }
+            ">=" => {
+                if nscript_f64(&nscript_checkvar(&a,vmap) ) >= nscript_f64(&nscript_checkvar(&c,vmap) ) {
+                    ret = true;
+                    return ret;
+                }
+            }
+            "<=" => {
+                if nscript_f64(&nscript_checkvar(&a,vmap) ) <= nscript_f64(&nscript_checkvar(&c,vmap) ) {
+                    ret = true;
+                    return ret;
+                }
+            }
+
             "<" => {
                 if nscript_f64(&nscript_checkvar(&a,vmap) ) < nscript_f64(&nscript_checkvar(&c,vmap) ) {
                     ret = true;
@@ -1040,6 +1223,8 @@ fn nscript_checkstatement(a: &str, b: &str, c: &str, vmap: &mut Varmap) -> bool 
 }
 
 fn nscript_combine(a: &Vec<&str>, vmap: &mut Varmap) -> String {
+    // this is a function wich comes strings concetinate.
+    // -------------------------------------------------
     let mut makestring = String::new();
     for r in 3..a.len() {
         makestring = makestring + &nscript_checkvar(&a[r],vmap);
@@ -1048,6 +1233,8 @@ fn nscript_combine(a: &Vec<&str>, vmap: &mut Varmap) -> String {
 }
 
 fn nscript_space(a: &Vec<&str>, vmap: &mut Varmap) -> String {
+    // everything is combined with a additional whitespace between them,
+    // ---------------------------------------------------
     let mut makestring = String::new();
     for r in 3..a.len() {
         makestring = makestring + &nscript_checkvar(&a[r],vmap) + " ";
@@ -1055,15 +1242,19 @@ fn nscript_space(a: &Vec<&str>, vmap: &mut Varmap) -> String {
     return Nstring::trimright(&makestring, 1);
 }
 
-fn nscript_string(a: &Vec<&str>, vmap: &mut Varmap) -> String {
-    let mut makestring = String::new();
-    for r in 3..a.len() {
-        makestring = makestring + &a[r] + " ";
-    }
-    return Nstring::trimright(&makestring, 1);
-}
+// fn nscript_string(a: &Vec<&str>, vmap: &mut Varmap) -> String {
+//     // kinda depreciated now theres a string "" system..
+//     // yeah this comes from the old au3nc..
+//     // -------------------------------------------
+//     let mut makestring = String::new();
+//     for r in 3..a.len() {
+//         makestring = makestring + &a[r] + " ";
+//     }
+//     return Nstring::trimright(&makestring, 1);
+// }
 
 fn nscript_f64(intasstr: &str) -> f64 {
+    // this is used on the nscript math system
     let onerr: f64 = 0.0;
     match intasstr.parse::<f64>() {
         Ok(n) => return n,
@@ -1080,7 +1271,9 @@ fn nscript_i32(intasstr: &str) -> i32 {
 }
 
 fn nscript_math(a: &str, method: &str, b: &str, vmap: &mut Varmap) -> String {
+    // this handles math operations from nscript. this is being looped in nscript_runmath()
     // in case of variables or calls return vallues be used.
+    // ----------------------------------------------------------
     let a_val = &nscript_checkvar(&a,vmap);
     let b_val =  &nscript_checkvar(&b,vmap);
     let mut res: f64 = 0.0;
@@ -1100,46 +1293,31 @@ fn nscript_math(a: &str, method: &str, b: &str, vmap: &mut Varmap) -> String {
         }
         _ => {
             //
+            let debugmsg = "Unexpected operator in math method".to_owned() + &a +" " + &method + " " + &b;
+            nscript_interpreterdebug(&debugmsg,vmap.debugmode,vmap.strictness);
         }
     };
     //println!("math = {a} {b} {c} with result={r}",a = &a_val,b = &method, c = &b_val,r = &res);
     return res.to_string();
 }
+fn nscript_runmath(splitline: &Vec<&str>,indexpars: usize, vmap: &mut Varmap) -> String{
+    // this will perform a line calculation
+    // indexpars = where the math begins var = x + 1 mea word[2] is the beginning
+    //----------------------------------------
 
-fn nscript_runmath(splitline: &Vec<&str>, vmap: &mut Varmap) -> String {
-    // takes the full line and processes the math from word 4 to end
-    match splitline.len() {
-        6 => {
-            // a + b
-            return nscript_math(splitline[3], splitline[4], splitline[5], vmap);
-        }
-        8 => {
-            // a + b + c
-            let q1 = nscript_math(splitline[3], splitline[4], splitline[5], vmap);
-            return nscript_math(&q1, splitline[6], splitline[7], vmap);
-        }
-        10 => {
-            // a + b + c + d
-            let q1 = nscript_math(splitline[3], splitline[4], splitline[5], vmap);
-            let q2 = nscript_math(&q1, splitline[6], splitline[7], vmap);
-            return nscript_math(&q2, splitline[8], splitline[9], vmap);
-        }
-
-        12 => {
-            // a + b + c + d + e
-            let q1 = nscript_math(splitline[3], splitline[4], splitline[5], vmap);
-            let q2 = nscript_math(&q1, splitline[6], splitline[7], vmap);
-            let q3 = nscript_math(&q2, splitline[8], splitline[9], vmap);
-            return nscript_math(&q3, splitline[10], splitline[11], vmap);
-        }
-        _ => {
-            return String::from("0");
-        }
+    let mut index = indexpars; // begin after var =
+    let mut result = nscript_math(&splitline[index] ,&splitline[index+1],&splitline[index+2],vmap);
+    index +=2;
+    while index < splitline.len()-1{
+        result = nscript_math(&result ,&splitline[index+1] ,&splitline[index+2],vmap);
+        index +=2;
     }
+    result
 }
 
 fn nscript_getarguments(fnword: &str, vmap: &mut Varmap) -> (Vec<String>, usize) {
-
+    // interall use for evaluating arguments passed on to functions
+    // -------------------------------------------------------
     let cleaned = Nstring::replace(&fnword, "(", " ");
     let cleaned2 = Nstring::replace(&cleaned, ")", "           "); // additional whitespaces to ensure the size of vec split
     let cleaned3 = Nstring::replace(&cleaned2, ",", " ");
@@ -1154,9 +1332,7 @@ fn nscript_getarguments(fnword: &str, vmap: &mut Varmap) -> (Vec<String>, usize)
     cmdline.push(cmdlineraw[0].to_string().clone());
     if cmdlineraw.len() > 1 {
         for _ in 1..cmdlineraw.len() {
-                        temp = nscript_checkvar(&cmdlineraw[indx],vmap);
-//println!("callingfn: {} arg :{}",&cmdlineraw[0],&temp);
-
+            temp = nscript_checkvar(&cmdlineraw[indx],vmap);
             cmdline.push(String::from(temp));
             indx = indx + 1;
         }
@@ -1165,6 +1341,9 @@ fn nscript_getarguments(fnword: &str, vmap: &mut Varmap) -> (Vec<String>, usize)
 }
 
 fn nscript_runfncall(fnword: &str, vmap: &mut Varmap) -> String {
+    // yeah i know right this is pretty funny, first day of rust lol
+    // yeah i gotta remake this i know !
+    // ----------------------------------------------------------
     let  fnname = &fnword.to_string();
     if Nstring::instring(&split(&fnname,"(")[0],"&") {
         let fnsplit = split(split(&fnname,"(")[0],".");
@@ -1172,28 +1351,18 @@ fn nscript_runfncall(fnword: &str, vmap: &mut Varmap) -> String {
 
             if fnsplit.len() == 1 {
                 let fnname = "".to_owned() + &nscript_checkvar(&Nstring::replace(&fnsplit[0], "&", ""),vmap)  + "(" + &split(&fnname,"(")[1] + ")";
-
-                //println!("_++from runfncall: func:{}",&fnname);
             }
-             if fnsplit.len() == 2 {
+            if fnsplit.len() == 2 {
                 let fnname = "".to_owned() + &nscript_checkvar(&Nstring::replace(&fnsplit[0], "&", ""),vmap) + "." + &nscript_checkvar(&Nstring::replace(&fnsplit[1], "&", ""),vmap) + "(" + &split(&fnname,"(")[1] + ")";
-
-                //println!("_++from runfncall: func:{}",&fnname);
             }
 
-            //println!("_++from runfncall: func:{}",&fnname);
         }
     }
     else {
-    //
-
-    if vmap.getcode(&Nstring::replace(&split(&fnname,"(")[0],".","__")) != "" {
-        //println!("from runfncall: func:{}",&fnname);
-       //return nscript_func(&nscript_funcextract(&fnname,vmap),vmap);
-
+        if vmap.getcode(&Nstring::replace(&split(&fnname,"(")[0],".","__")) != "" {
             return nscript_func(&fnname,vmap);
+        }
     }
-}
     //
     let mut fnresult = String::new();
     let (cmdline, numberargs) = &nscript_getarguments(&fnname, vmap);
@@ -1345,7 +1514,9 @@ fn nscript_runfncall(fnword: &str, vmap: &mut Varmap) -> String {
 }
 
 fn nscript_getprefix(s: &str) -> String {
-
+    // this is used on the parse_line() to get what a syntax is instead of evaluating it.
+    // this returns a string with the type of the nscript syntax
+    // -----------------------------------------------------------------------------
     if is_float(&s) || is_number(&s) {
         return String::from("int");
     }
@@ -1364,16 +1535,43 @@ fn nscript_getprefix(s: &str) -> String {
         "^" => return String::from("string"),
         "@" => return String::from("macro"),
         _ => {
-
-            if Nstring::instring(&s, "(") == true && Nstring::instring(&s, ")") == true {
+          if Nstring::instring(&s, "(") == true && Nstring::instring(&s, ")") == true {
                 return String::from("call");
             } else {
                 return String::from("var");
             }
         }
     };
-    //println!("DebuggeR: Getprefix{}",&ret);
-    //return ret;
+}
+
+fn nscript_setdebugmode(id: &str,vmap: &mut Varmap){
+    // this functions sets the console to show potentially unwanted behaviours of syntax.
+    // if you are unfamilliar with reflecting functions with dynamic variable name references, and
+    // want to code in a static style enable this it will show undeclared requests.
+    // however ! nscript comes with the power to call or request unset things this can offer you
+    // a flexible coding style and can lead to less if checks.
+    // --------------------------------------------------------------
+    match id {
+        "1" => {
+            vmap.debugmode = 1;
+        }
+        _ => {
+            vmap.debugmode = 0;
+        }
+    }
+}
+fn nscript_setrestrictionmode(id: &str,vmap: &mut Varmap){
+    // this sets nscript to exit the code if any unset var func class prop or thing is being used
+    // before its declared. 0 = ignore line return "" 1 - exit 2
+    //--------------------------------------------------------------------
+    match id {
+        "1" => {
+            vmap.strictness = 1;
+        }
+        _ => {
+            vmap.strictness = 0;
+        }
+    }
 }
 
 fn nscript_callfn(
@@ -1391,17 +1589,92 @@ fn nscript_callfn(
 ) -> String {
     // translate nscript calls towards the runtime functions and return vallues as string
     // all calls must be from String and back to String new adds be required to do so aswell
-    // let mut let toreturn = String::new();
+    // !! this is where you add your functions to the nscript syntaxis, if you have this included in your rust project
+    // --------------------------------------------------------------------------------------
     match func {
         // "scope" => {
         //     return "RET=>".to_owned() + &nscript_unpackscope(param2,param1,vmap)
         // }
+        "restrictionmode" => {
+            nscript_setrestrictionmode(&param1,vmap);
+            return "".to_owned() + &param1;
+        }
+        "debugmode" => {
+            nscript_setdebugmode(&param1,vmap);
+            return "".to_owned() + &param1;
+        }
+        "math" | "calc" => {
+            let res = nscript_runmath(&split(&param1," "),0, vmap);
+            return res;
+        }
+        "run" => {
+            return call_program(&param1);
+        }
+        // "decrypt" => {
+        //     return encrypt_string(&param1,&param2);
+        // }
+        //
+        // "encrypt" => {
+        //     return decrypt_string(&param1,&param2);
+        // }
+        "stringtobase64" => {
+            return string_to_base64(&param1);
+        }
+
+        "base64tostring" => {
+            return base64_to_string(&param1);
+        }
+        "unzip" => {
+            return unzip_file(&param1,&param2);
+        }
+        "zip" => {
+            return zip_directory(&param1,&param2);
+        }
+
+        "dirdelete" => {
+            return directory_delete(&param1);
+        }
+        "dirmove" => {
+            return directory_move(&param1,&param2);
+        }
+        "arraypush" => {
+            return arraypush(&param1,&param2);
+        }
+        "arraypushroll" => {
+            return arraypushroll(&param1,&param2);
+        }
+        "terminalinput" => {
+            return terminal_get_user_input(&param1,&param2);
+        }
         "discordmsg" => {
             send_message_to_discord_api(&param1, &param2);
             return String::new();
         }
+        "filecopy" => {
+            return filecopy(&param1,&param2);
+        }
+        "filedelete" => {
+            return filedelete(&param1);
+        }
+
+        "filemove" => {
+            return filemove(&param1,&param2);
+        }
+        "round" => {
+            return round_number(&param1,&param2);
+        }
+        "random" => {
+            return random_number_between(&param1,&param2,&param3);
+        }
         "dircreate" => {
             return create_directory(&param1);
+        }
+        "filesizebytes" => {
+            return filesizebytes(&param1);
+        }
+
+        "filesize" => {
+            return filesize(&param1);
         }
         "curl" => {
             return curl(&param1);
@@ -1419,7 +1692,9 @@ fn nscript_callfn(
         "poolremove" => {
             return poolremove(&param1,&param2);
         }
-
+        "arraysort" => {
+            return arraysort(&param1);
+        }
         "stackpush" => {
             vmap.stackpush(param1, param2);
             return String::new();
@@ -1444,7 +1719,7 @@ fn nscript_callfn(
         "stackpop" => {
             return vmap.stackpop(param1);
         }
-        "delobj" => {
+        "delobj"  | "objdel" => {
             // execute deconstruct function (if is has it)
             let isdeconfn = "_".to_owned() + &param1 + ".deconstruct()"; // should only execute if it exists.. else continue
             let deconstructfunc = vmap.getcode(&isdeconfn);
@@ -1515,6 +1790,13 @@ fn nscript_callfn(
             Nfile::write(param1, param2);
             return String::new();
         }
+        "splitselect" => {
+
+            return splitselect(&param1,&param2,parse_string_to_usize(&param2))
+        }
+        "file_read_utf8" =>{
+            return read_file_utf8(&param1).to_owned();
+        }
         "fexists" | "fileexists"=> {
             if Nfile::checkexists(param1) == true {
                 return String::from("1");
@@ -1522,7 +1804,7 @@ fn nscript_callfn(
                 return String::from("0");
             }
         }
-        "listdir" | "dirtolist" => {
+        "listdir" | "dirtolist" | "dirlist" => {
             if param2 == "" {
                 return Nfile::dirtolist(param1, false);
             } else {
@@ -1539,20 +1821,25 @@ fn nscript_callfn(
                 return String::from("0");
             }
         }
-        "sreplace" => {
-            return Nstring::replace(param1, param2, param3);
+        "replace" => {
+            //println!("replace a{} b{} c{}",&param1,&param2,&param3);
+//            let ret = param1.to_owned().replace(param2,param3);
+            let ret = Nstring::replace(param1,param2,param3);
+            //println!("replaced: [{}]",&ret);
+
+            return ret;            //return Nstring::replace(param1, param2, param3);
         }
-        "strimleft" => {
+        "trimleft" => {
             return Nstring::trimleft(param1, param2.parse::<usize>().unwrap());
         }
-        "strimright" => {
+        "trimright" => {
             return Nstring::trimright(param1, param2.parse::<usize>().unwrap());
         }
 
-        "sleft" => {
+        "fromleft" => {
             return Nstring::fromleft(param1, param2.parse::<usize>().unwrap());
         }
-        "sright" => {
+        "fromright" => {
             return Nstring::fromright(param1, param2.parse::<usize>().unwrap());
         }
         "save" => {
@@ -1573,6 +1860,15 @@ fn nscript_callfn(
         "exit" => {
             return String::from("exit");
         }
+        "arrayfilter" => {
+            return arrayfilter(param1,param2);
+        }
+        "arraysearch" => {
+            return arraysearch(param1,param2);
+        }
+        "arrayshuffle" => {
+            return arrayshuffle(param1);
+        }
         "" => {
             return String::new();
             //required?!
@@ -1584,7 +1880,7 @@ fn nscript_callfn(
             return html_encode(&param1);
         }
         "stringbetween" => return Nstring::stringbetween(param1, param2, param3),
-        "combine" => {
+        "combine" | "cmb"=> {
             // combines a string, honestly i just added this so the compiler wont bitch over unused param vars lol..
             let nothing = param1.to_owned()
                 + param2
@@ -1599,7 +1895,7 @@ fn nscript_callfn(
         }
         _ => {
             let error = "".to_owned() + "A non declared function call is done:" + &func;
-            cwrite(&error,"red");
+            nscript_interpreterdebug(&error,vmap.debugmode,vmap.strictness);
             return String::new();
             // debug broken/non existing call
         }
@@ -1607,6 +1903,9 @@ fn nscript_callfn(
 }
 
 fn cwrite(m: &str, color: &str) {
+    // this is more a linux then a windows feature.
+    // as for windows powershell is just lame. itl work but dont expect all colors to show!
+    // --------------------------------------------
     match color {
         "cyan" => {
             println!("{}", m.cyan());
@@ -1631,16 +1930,15 @@ fn cwrite(m: &str, color: &str) {
 
 
 fn nscript_func(func: &str, vmap: &mut Varmap) -> String {
-    //println!("RunningFunc:{}",&func);
-    let (args, id) = nscript_getarguments(&func, vmap); // get all argument params
+    // this is the function wich executes a nscript user made function !
+    // -----------------------------------------------------------------
+   let (args, id) = nscript_getarguments(&func, vmap); // get all argument params
     let func = func.trim();
     for r in 1..id {
-        //let paramx = &r + 1;
+        //let paramx = &r + 1
+
         let pname = "".to_owned() + &vmap.codelevel.to_string() + "__internalparam" + &r.to_string();
-        //print!("setting param: ");
-        //cwrite(&pname, "yellow");
-        //cwrite(&args[r], "green");
-        vmap.setvar(pname, &args[r]); // set all param arguments
+       vmap.setvar(pname, &args[r]); // set all param arguments
     }
     let mut fname = String::from(&args[0]);
 
@@ -1657,17 +1955,15 @@ fn nscript_func(func: &str, vmap: &mut Varmap) -> String {
     // block only
     if Nstring::instring(&func, ".") == true {
         let splitfn = split(&func, ".");
-        if Nstring::fromleft(&splitfn[0], 1) == "_".to_owned() {
-            // trim prefix _
+        if Nstring::fromleft(&splitfn[0], 1) == "_".to_owned() {//<-- this kinda is also from the
+            //old syntax old nc begin with _ for udf.
+
             isclass = Nstring::trimleft(&splitfn[0].trim(), 1);
-            //println!("PrefixTrimmed:{}",&isclass);
+
         } else {
             isclass = splitfn[0].trim().to_string().clone();
         }
-        //isclass = nscript_checkvar(&isclass,vmap); // <<----- should be only on &
-        //vmap.setvar("$__self".to_owned(), &isclass); // assign $__self = classname
-
-        let cleanfnname = split(&splitfn[1], "(");
+       let cleanfnname = split(&splitfn[1], "(");
         let mut fnname = String::from(cleanfnname[0].trim());
         let mut reg = "nscript_classfuncs__".to_owned()  + &isclass +"."+ &fnname;
 
@@ -1697,20 +1993,11 @@ fn nscript_func(func: &str, vmap: &mut Varmap) -> String {
         //println!("setting self to:[{}]",&isclass);
         usedself = &isclass;
         iscodebblock = Nstring::replace(&iscodebblock, "self.", "&self."); // change all to the obj itself.
-//cwrite(&iscodebblock,"red");
-    } else {
+   } else {
         iscodebblock = vmap.getcode(&fname); // load code
-        //cwrite(&iscodebblock,"red");
-        //println!("Just taking codeblock: {}",&fname);
-    }
-
-    //let debug = "------------Block=-\n\r".to_owned() + &iscodebblock;
-    //println!("{}", &func);
-    let internalcoderef = vmap.getprop("__interpreter","parsingsubsheet");
-// vmap.setcode(&internalcoderef,&iscodebblock);
-// nscript_loop_scopeextract(&usedself,vmap);
-// iscodebblock = vmap.getcode(&internalcoderef);
-        let get = nscript_parsecompiledsheet(&iscodebblock, vmap); // run code
+   }
+   let internalcoderef = vmap.getprop("__interpreter","parsingsubsheet");
+       let get = nscript_parsesheet(&nscript_stringextract(&iscodebblock), vmap); // run code
         let isclass = vmap.stackpop("___self");
         vmap.setvar("self".to_owned(), &isclass);
 
@@ -1731,48 +2018,41 @@ fn nscript_execute_script(
     param9: &str,
     vmap: &mut Varmap,
 ) -> String {
-    // parses a script
- //nscript_setparams(&url_args,vmap);
+
+    //---------------------------------------------------------------------------------------
+    //This is where you begin to load a .nc sheet this will exclude and load all classes and
+    //functions aswell1, unlike parseshee() this is actually the full deal1, allias in nscript
+    //syntax : exec(filename)
+    //----------------------------------------------------------------------------------------
+
     vmap.parsinglevel = vmap.parsinglevel + 1;
     let thisparsingsheet = "_".to_owned() + &vmap.parsinglevel.to_string() +"__interpretercode";
 
     let thisparsingsubsheet = "_".to_owned() + &vmap.parsinglevel.to_string() +"__interpretersubcode";
     vmap.setprop("__interpreter","parsingsheet",&thisparsingsheet);
     vmap.setprop("__interpreter","parsingsubsheet",&thisparsingsubsheet);
-    let  mut code = Nfile::read(file);
-
-
-
-
-
+    let  mut code = read_file_utf8(&file);
     vmap.setcode(&thisparsingsheet,&code);
-
     nscript_class_scopeextract(vmap);
-
     let code = vmap.getcode(&thisparsingsheet);
-    //println!("_________________replacement:\n{}",&code);
-
-    //println!("__________________");
     nscript_func_scopeextract("", vmap);
-
-    //println!("__________________");
-    //nscript_loop_scopeextract("", vmap);
-
     let code = vmap.getcode(&thisparsingsheet);
- //println!("running code! {}",&code);
-vmap.parsinglevel = vmap.parsinglevel - 1;
-
+    vmap.parsinglevel = vmap.parsinglevel - 1;
     let thisparsingsheet = "_".to_owned() + &vmap.parsinglevel.to_string() +"__interpretercode";
-
     let thisparsingsubsheet = "_".to_owned() + &vmap.parsinglevel.to_string() +"__interpretersubcode";
-
     let ret = nscript_parsesheet(&code, vmap);
     vmap.setprop("__interpreter","parsingsheet",&thisparsingsheet);
     vmap.setprop("__interpreter","parsingsubsheet",&thisparsingsubsheet);
     // println!("newsheet:{}",code);
     ret
 }
+
 fn nscript_packscope(code: &str,scopeid: &str) -> String {
+    // this is a internally used function to encapsulate scopes.
+    // the scopes are being packed back into 1 line so its faster and easier to interpretate.
+    // scopeid is a unique number wich is used to pack the scope, this way each scope can be
+    // unpacked sepperatly.
+    // --------------------------------------------------------------------------------------
     let newid = "%".to_owned() + scopeid + "%";
         let mut ifcodenew = Nstring::replace(&code, " ", "%id%sp%");
         ifcodenew = Nstring::replace(&ifcodenew, LINE_ENDING, "%id%lf%");
@@ -1786,21 +2066,21 @@ fn nscript_packscope(code: &str,scopeid: &str) -> String {
     let ret = " scope(".to_owned() + &scopeid + "," + &Nstring::replace(&ifcodenew, "%id%", &newid) + ")";
  ret
 }
+
 fn nscript_unpackscope(code: &str,scopeid: &str,vmap: &mut Varmap) -> String {
+    // this unpacks a packed scope and runs it.
+    // related: nscript_unpackscopereturnclean()
+    // ---------------------------------------
     let newid = "%".to_owned() + scopeid + "%";
     let mut ifcodenew = Nstring::replace(&code,&newid,  "%id%");
-        ifcodenew = Nstring::replace(&ifcodenew, "%id%sp%", " ");
-        ifcodenew = Nstring::replace(&ifcodenew, "%id%lf%", CODE_LINE_ENDING);
-        ifcodenew = Nstring::replace(&ifcodenew,  "%id%bo%","(");
-        ifcodenew = Nstring::replace(&ifcodenew,  "%id%bc%",")");
-        ifcodenew = Nstring::replace(&ifcodenew, "%id%c%",",");
-
+    ifcodenew = Nstring::replace(&ifcodenew, "%id%sp%", " ");
+    ifcodenew = Nstring::replace(&ifcodenew, "%id%lf%", CODE_LINE_ENDING);
+    ifcodenew = Nstring::replace(&ifcodenew,  "%id%bo%","(");
+    ifcodenew = Nstring::replace(&ifcodenew,  "%id%bc%",")");
+    ifcodenew = Nstring::replace(&ifcodenew, "%id%c%",",");
     ifcodenew = Nstring::replace(&ifcodenew, "%id%cbo%","{");
-
     ifcodenew = Nstring::replace(&ifcodenew, "%id%cbc%","}");
-    // ofniet dan pik ! :D
-//println!("BlockUnpack:{}",&ifcodenew);
-    let res = nscript_parsesheet(&ifcodenew,vmap);
+    let res = nscript_parsecompiledsheet(&nscript_compilesheet(&ifcodenew),vmap);
     if res ==".." {
         res
     }
@@ -1810,22 +2090,28 @@ fn nscript_unpackscope(code: &str,scopeid: &str,vmap: &mut Varmap) -> String {
 
 }
 fn nscript_unpackscopereturnclean(code: &str,scopeid: &str,vmap: &mut Varmap) -> String {
+    // this unpacks a scope and returns the scope's code instead.
+    // --------------------------------------------------------
     let newid = "%".to_owned() + &scopeid + "%";
-
     let mut ifcodenew = Nstring::replace(&code,&newid,  "%id%");
-let pref = "scope(".to_owned() + &scopeid + ",";
+    let pref = "scope(".to_owned() + &scopeid + ",";
     ifcodenew = Nstring::replace(&ifcodenew,&pref,  "");
-        ifcodenew = Nstring::replace(&ifcodenew, "%id%sp%", " ");
-        ifcodenew = Nstring::replace(&ifcodenew, "%id%lf%", CODE_LINE_ENDING);
-        ifcodenew = Nstring::replace(&ifcodenew,  "%id%bo%","(");
-        ifcodenew = Nstring::replace(&ifcodenew,  "%id%bc%",")");
-        ifcodenew = Nstring::replace(&ifcodenew, "%id%c%",",");
-//println!("BlockUnpack:{}",&ifcodenew);
+    ifcodenew = Nstring::replace(&ifcodenew, "%id%sp%", " ");
+    ifcodenew = Nstring::replace(&ifcodenew, "%id%lf%", CODE_LINE_ENDING);
+    ifcodenew = Nstring::replace(&ifcodenew,  "%id%bo%","(");
+    ifcodenew = Nstring::replace(&ifcodenew,  "%id%bc%",")");
+    ifcodenew = Nstring::replace(&ifcodenew, "%id%c%",",");
+    //println!("BlockUnpack:{}",&ifcodenew);
     ifcodenew
 
 }
 
 fn nscript_scopeextract(text: &str) -> String {
+    // internal used in : class_scopeextract() func_scopeextr..
+    // this is used to extract scopes like classes, functions.
+    // it takes the full sheet of code, extract the scopes so that the internal interpreter doesnt
+    // run them after the cleaning is done.
+    // ------------------------------------------------------------------------------------
     let mut parsingtext = text.to_string();
     let mut toreturn = String::new();
     loop {
@@ -1847,21 +2133,22 @@ fn nscript_scopeextract(text: &str) -> String {
 }
 
 fn nscript_stringextract(text: &str) -> String {
-    let mut parsingtext = text.to_string();
-   // let mut toreturn = String::new();
+    // this will convert all static strings to a ^hexnumber
+    // ive used this so that the spaces woulnd interfere with the syntax.
+    // nscript_checkvar() will regonise ^3131 formats and unhex them where needed.
+    // ------------------------------------------------------------------------
+    let mut parsingtext = Nstring::replace(&text.to_string(),"\\\"","#!@NSCRIPTQUOTE#@!");
+parsingtext = Nstring::replace(&parsingtext,"\"\"","@emptystring");
+
     loop {
         let splitstr = Nstring::stringbetween(&parsingtext,"\"","\"");
-
-        if splitstr !=  "" {
-            let packed = "^".to_owned() + &string_to_hex(&splitstr)  ;
+        if splitstr != "" {
+            let packed = "^".to_owned() + &string_to_hex(&Nstring::replace(&splitstr,"#!@NSCRIPTQUOTE#@!","\""))  ;
             let toreplace = "\"".to_owned() + &splitstr+ "\"";
-            //println!("FoundString: [{}]",&splitstr);
             parsingtext = Nstring::replace(&parsingtext, &toreplace, &packed);
-            //println!("Text:{}",&parsingtext);
         }
         else {
-            // toreturn = split(&splitstr[0],"\"")[0].to_string();
-            break;
+           break;
         }
     }
     parsingtext
@@ -1869,13 +2156,18 @@ fn nscript_stringextract(text: &str) -> String {
 
 
 fn nscript_class_scopeextract(vmap: &mut Varmap){
+    // this function will at the beginning of executing a script extract and load
+    // all class scopes, all functions inside these scopes will be linked giving access to self var
+    // usage.
+    //  - special: function .construct() will be triggered if a class spawns of a class wich has
+    //  this declared. func .construct() on obj a : b   and on delobj(a) .destruct() will be
+    //  triggered.
+    // -----------------------------------------------------------------------
     //let mut parsingtext = text.to_string();
     let mut toreturn = String::new();
     let parsecode = vmap.getprop("__interpreter","parsingsheet");
     let parsesubcode = vmap.getprop("__interpreter","parsingsubsheet");
-
     let code = vmap.getcode(&parsecode);
-
     let mut i = 0; //<-- serves to filter first split wich isnt if found but default.
     let classes = split(&code,"class");
     for eachclass in classes {
@@ -1889,15 +2181,16 @@ fn nscript_class_scopeextract(vmap: &mut Varmap){
                     vmap.setobj(&classname[1], &classname[0]);
                 }
                 let block = extract_scope(&eachclass);// extract the class scope between { }
-                vmap.setcode(&parsesubcode,&block);
+                vmap.setcode(&parsesubcode,&block);// assign the subscope
 
-                nscript_func_scopeextract(classname[0],vmap);
+                nscript_func_scopeextract(classname[0],vmap);// extract functions from class scope
                 let blocknew = vmap.getcode(&parsesubcode); // remaining when functions are removed
                 //println!("Subblock::{}",&blocknew);
-                vmap.setvar("self".to_owned(), &classname[0].trim());
+                vmap.setvar("self".to_owned(), &classname[0].trim());// assigning self var self.
                 //println!("running class extraction assigning self:{}",&classname[0]);
-                let blocknew = Nstring::replace(&blocknew, "self.", "&self.");
+                let blocknew = Nstring::replace(&blocknew, "self.", "&self.");// Reflect self!!!
                 nscript_parsesheet(&blocknew, vmap);// run the remaining as classblock.
+                //println!("Blc:{}",&blocknew);
                 let toreplace = "class".to_owned() + &classnamepart +  &block ;
                 if Nstring::instring(&toreplace, "{") && Nstring::instring(&toreplace, "}")  {
                     //println!("The replacement: {}",&toreplace);
@@ -1915,6 +2208,9 @@ fn nscript_class_scopeextract(vmap: &mut Varmap){
 }
 
 fn nscript_func_scopeextract(selfvar: &str,vmap: &mut Varmap) {
+    // this will extraxt all the function scopes from a code sheet.
+    //
+    // -------------------------------------------------------
     //let mut parsingtext = text.to_string();
     let parsecode = vmap.getprop("__interpreter","parsingsheet");
     let parsesubcode = vmap.getprop("__interpreter","parsingsubsheet");
@@ -1945,6 +2241,7 @@ fn nscript_func_scopeextract(selfvar: &str,vmap: &mut Varmap) {
                 let classname = split(&firstline, "(")[0];
                 let classnamefixed = &classname.to_owned().clone();
                 let mut block = extract_scope(&eachclass);
+                let cleanblock = block.clone();
                 let argumentsraw = split(&firstline, "(");
 
 
@@ -1957,9 +2254,10 @@ fn nscript_func_scopeextract(selfvar: &str,vmap: &mut Varmap) {
                             if thisargument != "" {
 
                                 //println!("this-argument:{}[{}]",&i,&thisargument);
-                                i += 1;
-                                let param = "".to_owned() + "internalparam" + &i.to_string() +  " ";
-                                let torep = "".to_owned() + &thisargument +" ";
+                                i += 1; // bellow  we replace the given argument/parameters back
+                                // towars internalparamx
+                                let param = "\n".to_owned() + "internalparam" + &i.to_string() +  " ";
+                                let torep = "\n".to_owned() + &thisargument +" ";
                                 block = Nstring::replace(&block,&torep, &param);
                                 let param = "(".to_owned() + "internalparam" + &i.to_string() + "";
                                 let torep = "(".to_owned() + &thisargument + "";
@@ -1978,9 +2276,20 @@ fn nscript_func_scopeextract(selfvar: &str,vmap: &mut Varmap) {
                     }
                     else{
                         if splitarguments[0] != "" {
-                            let param = "".to_owned() + "internalparam1" ;
-                            let torep = "".to_owned() + &splitarguments[0];
-                            block = Nstring::replace(&block,&torep, &param);
+
+                                let param = "\n".to_owned() + "internalparam1" + " ";
+                                let torep = "\n".to_owned() + &splitarguments[0] + " ";
+                                block = Nstring::replace(&block,&torep, &param);
+                                let param = "(".to_owned() + "internalparam1";
+                                let torep = "(".to_owned() + &splitarguments[0];
+                                block = Nstring::replace(&block,&torep, &param);
+                                let param = ",".to_owned() + "internalparam1" ;
+                                let torep = ",".to_owned() + &splitarguments[0];
+                                block = Nstring::replace(&block,&torep, &param);
+                                //
+                                let param = " ".to_owned() + " internalparam1";
+                                let torep = " ".to_owned() + &splitarguments[0] ;
+                                block = Nstring::replace(&block,&torep, &param);
 
                         }
                     }
@@ -1992,31 +2301,29 @@ fn nscript_func_scopeextract(selfvar: &str,vmap: &mut Varmap) {
                     vmap.setvar(functionregobj.clone(), &selfvar.trim());
                     let block = Nstring::trimleft(&block, 1);
                     let block = Nstring::trimright(&block, 1);
-                    let block = trim_lines(&block);
-                    let block = nscript_stringextract(&block);
-                    let block  = nscript_scopeextract(&block);
-                    vmap.setcode(&classnamefixed, &block.trim());
+                    // let block = trim_lines(&block);
+                     let block = nscript_stringextract(&block);
+                     let block  = nscript_scopeextract(&block);
+                    vmap.setcode(&classnamefixed, &nscript_compilesheet(&block));
                     //println!("Setting func: {} \n with block: \n{}",&functionregobj, &block);
                 }
                 else {
                     // if not inside a classscope
                     //println!("new:{}",&block);
-                    // let block = trim_lines(&block);
-                    // let block = nscript_stringextract(&block);
+                     let block = trim_lines(&block);
+                     let block = nscript_stringextract(&block);
                     // let block  = nscript_scopeextract(&block);
 
                     vmap.setcode(&classname, &nscript_compilesheet(&block));
                 }
-                let toreplace = "func ".to_owned() + & split(&eachclass, "{")[0] +  &block ;
+                let toreplace = "func ".to_owned() + & split(&eachclass, "{")[0] +  &cleanblock ;
 
                 // set the modified code
 
-                if Nstring::instring(&toreplace, "{") && Nstring::instring(&toreplace, "}") {
-                    vmap.setcode(&internalcoderef,&Nstring::replace(&code, &toreplace,"" ));
-                    //println!("Foundfunc:{}",&classname);
-                    //                println!("funccode:{}",&toreplace);
+                if Nstring::instring(&toreplace, "{") && Nstring::instring(&toreplace, "}") {// extraxt
+                    // the functions from the class/script to clean it out.
+                    vmap.setcode(&internalcoderef,&Nstring::replace(&code.trim(), &toreplace.trim(),"" ));
 
-                    //println!("classcode:{}",&vmap.getcode(&internalcoderef));
                 }
             }
         }
@@ -2025,16 +2332,16 @@ fn nscript_func_scopeextract(selfvar: &str,vmap: &mut Varmap) {
 
 }
 fn nscript_compilesheet(code: &str) -> String{
-    //                 let block = trim_lines(&block);
-    //                 let block = nscript_stringextract(&block);
-    //                 let block  = nscript_scopeextract(&block);
+    // this function preformats a sheet and these can be run with nscript_parsecompiledsheet()
+    // used in : For / While / func
+    // ------------------------------------------------------------------------------
     let mut newcode = String::new();
     let lines = code.split(LINE_ENDING);
     for line in lines {
         let fxline = split(&line,"//")[0];
         newcode = "".to_owned() + &newcode + &fxline + LINE_ENDING;
     }
-    nscript_scopeextract(&nscript_scopeextract(&trim_lines(&newcode)))
+    nscript_scopeextract(&nscript_stringextract(&trim_lines(&kill_bill(&newcode))))
 }
 fn nscript_loop_scopeextract(selfvar: &str,vmap: &mut Varmap) {
     let parsecode;
@@ -2086,6 +2393,8 @@ fn nscript_loop_scopeextract(selfvar: &str,vmap: &mut Varmap) {
 }
 
 fn extract_scope(text: &str) -> String {
+    // a internal function to remove the scopes
+    // -------------------------------
     let mut stack = Vec::new();
     let mut start = None;
     let mut end = None;
@@ -2119,26 +2428,91 @@ fn extract_scope(text: &str) -> String {
 }
 
 fn nscript_funcextract(text: &str,vmap: &mut Varmap) -> String {
-    //let mut parsingtext = text.to_string();
+    // this function will extract and run nested functions from inner to outer
+    // it will return 1 function back with all the arguments as evaluated nscript syntaxis,
+    // --> funca(funcb(func()),funcd())
+    // ----------------------------------------------------------
     let mut resultstring =text.to_string();
     let mut packed = String::new();
     let mut subfunction = String::new();
 
     loop {
+        // get the last find in the string using (
+        let splitstr = split(&resultstring,"(");
+        // make sure its inside the main function so bigger>2
+        if splitstr.len() > 2 {
+            //take that substring and split up to the first )
+            let splitscope = split(&splitstr[splitstr.len()-1],")");
+            if splitscope.len() > 0 {
+                // important one, if a variable or string is infron it
+                // messes up the syntax so we split using comma
+                let splitargus = split(&splitstr[splitstr.len()-2],",");
+                // here we set thisfnname to the last part of the comma split
+                let thisfnnamefix = splitargus[splitargus.len() -1];// make sure the function
+                // here we check if the function given is reflected if so we evaluate the value of
+                // the var and executre the function of the data from that var as a string
+                if Nstring::fromleft(&splitstr[splitstr.len()-2],1) == "&"{
+                    subfunction = "".to_owned() + &nscript_checkvar(&Nstring::replace(&thisfnnamefix,"&",""), vmap) + "(" + &splitscope[0]  + ")";
+                }
+                else {
+                    // if its a normal funcion we run it.
+                    subfunction = "".to_owned() + &thisfnnamefix + "(" + &splitscope[0]  + ")";
+                }
+                // here we evaluate the none function types.
+                packed = "^".to_owned() + &string_to_hex( &nscript_runfncall(&subfunction, vmap));
+            }
+            else{
+                // this also evaluates variables macros strings etc
+                subfunction = "".to_owned() + &splitscope[0]; //&splitstr[splitstr.len()-1];
+                packed = "".to_owned() + &nscript_checkvar(&splitscope[0], vmap);
+            }
+            let mut reflect = false;
+            if splitscope.len() > 0 {
+                // so this replaces the evaluated values in the word's() when
+                // its all done it will return 1 function to parseline() wich be used to set the
+                // variable
+                if Nstring::fromleft(&splitstr[splitstr.len()-2],1) == "&" {
+                    subfunction = "".to_owned() + &splitstr[splitstr.len()-2] + "(" + &splitscope[0]  + ")";
+                    resultstring = Nstring::replace(&resultstring, &subfunction, &packed);
+                    reflect = true
+                }
+            }
+            if reflect == false{
+                // very important! this reforms the strings till its made back to 1 function with
+                // all evaluated data types. when this is done theres no double (( )) insde the
+                // code and this function will exit and return the 1-function to parse_line()
+                resultstring = Nstring::replace(&resultstring, &subfunction, &packed);
+            }
+        }
+        else {
+            break;
+        }
+    }
+    resultstring
+}
+
+fn nscript_funcextract_bk(text: &str,vmap: &mut Varmap) -> String {
+    // this function will extract and run nested functions from inner to outer
+    // it will return 1 function back with all the arguments as evaluated nscript syntaxis,
+    // --> funca(funcb(func()),funcd())
+    // ----------------------------------------------------------
+    let mut resultstring =text.to_string();// contains the string, we reform it back to 1 function
+    // with evaluted things.
+    let mut packed = String::new();
+    let mut subfunction = String::new();
+
+    loop {
+        println!("Resultstring:{}",&resultstring);
         let splitstr = split(&resultstring,"(");
         if splitstr.len() > 2 {
             let splitscope = split(&splitstr[splitstr.len()-1],")");
             if splitscope.len() > 0 {
                 if Nstring::fromleft(&splitstr[splitstr.len()-2],1) == "&"{
                     subfunction = "".to_owned() + &nscript_checkvar(&Nstring::replace(&splitstr[&splitstr.len()-2],"&",""), vmap) + "(" + &splitscope[0]  + ")";
-
                 }
                 else {
-
                     subfunction = "".to_owned() + &splitstr[splitstr.len()-2] + "(" + &splitscope[0]  + ")";
                 }
-                //packed = "^".to_owned() + &string_to_hex( &nscript_parseline(&subfunction, vmap));
-
                 packed = "^".to_owned() + &string_to_hex( &nscript_runfncall(&subfunction, vmap));
             }
             else{
@@ -2149,8 +2523,6 @@ fn nscript_funcextract(text: &str,vmap: &mut Varmap) -> String {
             let mut reflect = false;
             if splitscope.len() > 0 {
                 if Nstring::fromleft(&splitstr[splitstr.len()-2],1) == "&" {
-                    // make sure the code doesnt hang , this replaces the original code , the reflection is done
-                    //println!("Packed:{}",&packed);
                     subfunction = "".to_owned() + &splitstr[splitstr.len()-2] + "(" + &splitscope[0]  + ")";
                     resultstring = Nstring::replace(&resultstring, &subfunction, &packed);
                     reflect = true
@@ -2158,12 +2530,7 @@ fn nscript_funcextract(text: &str,vmap: &mut Varmap) -> String {
             }
             if reflect == false{
                 resultstring = Nstring::replace(&resultstring, &subfunction, &packed);
-
             }
-                        // println!("parsing; {}",&subfunction);
-            // println!("code_parsing: {}",&parsingtext);
-            // println!("code_new: {}",&resultstring);
-            // println!("resultfunc {}",&packed);
         }
         else {
             break;
@@ -2174,18 +2541,18 @@ fn nscript_funcextract(text: &str,vmap: &mut Varmap) -> String {
 }
 
 
-fn nscript_setparams(args: &Vec<&str>,vmap: &mut Varmap){
-//println!("setting params leve:{}",&vmap.codelevel+0);
-    let id = args.len();
-    if id > 1 {
+
+fn nscript_setparams_handleconnections(args: &Vec<String>,vmap: &mut Varmap){
+// this function sets parameters when jumping functions. used on htmlserver
+// because of the code level these params are differently set then functions.
+let id = args.len();
+    if id > 0 {
+        //println!("codelevle = {}",&vmap.codelevel);
         let codelevelabove = &vmap.codelevel +0;// <- yeah seems neccesary for vmap.
         for r in 0..id {
             //let paramx = &r + 1;
             let paramid = r + 1;
             let pname = "".to_owned() + &codelevelabove.to_string() + "__internalparam" + &paramid.to_string();
-            //print!("setting param: ");
-            //cwrite(&pname, "yellow");
-            //cwrite(&args[r], "green");
             vmap.setvar(pname, &args[r]); // set all param arguments
         }
     }
@@ -2193,30 +2560,46 @@ fn nscript_setparams(args: &Vec<&str>,vmap: &mut Varmap){
 }
 
 fn handle_connection(mut stream: TcpStream,  vmap: &mut Varmap) {
+    // this is the webserver part it will take a GET request and handle it.
+    // text files are on the main thread for other downloads it goes to a other thread
+    // .nc files are being regonised and they will return their return results to the user browser.
+    // --------------------------------------------------------------------------------------
     let mut buffer = [0; 1024];
     stream.read(&mut buffer).unwrap();
     let request = String::from_utf8_lossy(&buffer[..]);
+    //println!("http={}",&request);
+    let domainname = Nstring::stringbetween(&request,"Host: ","\n");
+    vmap.setvar("___domainname".to_owned(),&domainname);
     let request_parts: Vec<&str> = request.split(" ").collect();
     let pathparts = split(&request_parts[1][1..],"?");
     let mut url_args = Vec::new();
-    let mut newparams = Vec::new();
+    //let mut newparams = Vec::new();
     if pathparts.len() > 1 {
         url_args = split(pathparts[1], "&");
     }
-    let mut tmpstr = "";
-       for i in 1..10 {
+
+    let mut newparams: Vec<String> = Vec::new();
+
+    for i in 1..10 {
        if url_args.len()  > i - 1 {
-        let todecode = &url_args[i-1].clone();
-            //tmpstr = &decode_html_url(&todecode);
-            newparams.push(&url_args[i-1]);
+            newparams.push(decode_html_url(&url_args[i-1].to_owned()));
         }
         else {
-            newparams.push(&"");
+            newparams.push(String::from(""));
         }
     }
 
-    nscript_setparams(&url_args,vmap);
-    let file_path = format!("{}{}", SERVER_ROOT, &pathparts[0]);
+    nscript_setparams_handleconnections(&newparams,vmap);
+    let mut file_path = format!("{}{}", SERVER_ROOT, &pathparts[0]);
+
+
+    let checkthis = SCRIPT_DIR.to_owned() + "domains/" + &split(&vmap.getvar("___domainname"),":")[0]+"/http.nc";
+    if Nfile::checkexists(&checkthis){
+        file_path = SCRIPT_DIR.to_owned() + "domains/"  + &split(&vmap.getvar("___domainname"),":")[0]+"/public/"+&pathparts[0];
+
+    }
+    //println!("filepath = [{}]",&file_path);
+
     if let Some(extension) = Path::new(&file_path).extension().and_then(|os_str| os_str.to_str().map(|s| s.to_owned())) {
         if ["jpg", "jpeg", "png", "gif"].contains(&extension.as_str()) {
             let file_path_clone = file_path.clone(); // clone file_path
@@ -2242,7 +2625,7 @@ fn handle_connection(mut stream: TcpStream,  vmap: &mut Varmap) {
         Err(_) => {
             let response = format!("HTTP/1.1 404 NOT FOUND\r\n\r\n");
             stream.write(response.as_bytes()).unwrap();
-            println!("is 404");
+            //println!("is 404");
             return;
         }
     };
@@ -2259,9 +2642,14 @@ fn handle_connection(mut stream: TcpStream,  vmap: &mut Varmap) {
     };
 
     if isnc {
-        let scriptcode = Nfile::read(&file_path);
+
+        let scriptcode = read_file_utf8(&file_path);
+        //println!("scriptcode:{}",&scriptcode);
         //let ret = nscript_execute_script(&scriptcode,newparams[0],newparams[1],newparams[2],newparams[3],newparams[4],newparams[5],newparams[6],newparams[7],newparams[8],vmap);
-        let ret = nscript_parsesheet(&scriptcode, vmap);
+        let compcode = nscript_compilesheet(&nscript_stringextract(&scriptcode));
+
+        let ret = nscript_parsesheet(&compcode, vmap);
+        nscript_clearparams_handleconnections(vmap);
         //cwrite(&ret,&"red");
         //
         let response = format!("HTTP/1.1 200 OK\r\nContent-Type: {}\r\nContent-Length: {}\r\n\r\n", content_type, &ret.len());
@@ -2277,6 +2665,33 @@ fn handle_connection(mut stream: TcpStream,  vmap: &mut Varmap) {
 
 
 }
+#[cfg(windows)]
+fn set_nonblocking<T: AsRawSocket>(socket: &T) -> Result<(), io::Error> {
+    use std::os::windows::raw::c_ulong;
+    use std::os::windows::io::FromRawSocket;
+
+    let raw_socket = socket.as_raw_socket() as SOCKET;
+    let mut nonblocking: c_ulong = 1;
+    let result = unsafe { ioctlsocket(raw_socket, FIONBIO, &mut nonblocking) };
+    if result != 0 {
+        return Err(io::Error::last_os_error());
+    }
+    Ok(())
+}
+
+#[cfg(windows)]
+fn ioctlsocket(socket: SOCKET, cmd: c_long, argp: *mut c_ulong) -> i32 {
+    unsafe {
+        ioctlsocket::ioctlsocket(socket, cmd, argp)
+    }
+}
+
+#[cfg(not(windows))]
+fn set_nonblocking(socket: &TcpListener) -> Result<(), io::Error> {
+    // Linux-specific implementation
+    socket.set_nonblocking(true)?;
+    Ok(())
+}
 //----------------RegionNscript------------------/\--------------
 fn main() -> std::io::Result<()>  {
 //send_message_to_discord_api()
@@ -2286,14 +2701,44 @@ fn main() -> std::io::Result<()>  {
     println!("____________________________________");
 
     let listener = TcpListener::bind(format!("{}:{}", SERVER_ADDRESS, SERVER_PORT)).unwrap();
-    listener.set_nonblocking(true)?;
+    set_nonblocking(&listener)?;
     println!("Server started at http://{}:{}", SERVER_ADDRESS, SERVER_PORT);
-    nscript_execute_script(&"./server.swift","","","","","","","","","",&mut vmap);
-   loop {
+    let serverscriptfilename = SCRIPT_DIR.to_owned() +"server.nc";
+
+    let domaindir = SCRIPT_DIR.to_owned() +"domains/";
+    let domdir = Nfile::dirtolist(&domaindir,false);
+    let domaindirarr = split(&domdir,NC_ARRAY_DELIM);
+
+
+    nscript_execute_script(&serverscriptfilename,"","","","","","","","","",&mut vmap);
+
+
+
+
+
+    for domainscript in domaindirarr {
+        if domainscript != ""{
+            vmap.setvar("___domainname".to_owned(),&domainscript);
+            let domainscript = SCRIPT_DIR.to_owned() + "domains/"+domainscript + "/http.nc";
+
+
+            nscript_execute_script(&domainscript,"","","","","","","","","",&mut vmap);
+            println!("Loading domain script:[{}]",&domainscript);
+
+
+
+        }
+    }
+
+    loop {
 
         nscript_loops(&mut vmap);
         match listener.accept() {
             Ok((stream, _)) => {
+                let remote_ip = stream.peer_addr().unwrap().ip();
+                vmap.setvar("___thissocketip".to_owned(),&remote_ip.to_string());
+                println!("Client connecting:{}",remote_ip.to_string());
+
                 handle_connection(stream,&mut vmap);
             }
 
@@ -2481,24 +2926,24 @@ impl Timer {
         }
         return timerstring.parse::<i64>().unwrap();
     }
-    pub fn stamp() -> String {
-        let time = chrono::Utc::now();
-        let formatstring = time.year().to_string()
-            + &"-".to_owned()
-            + &time.month().to_string()
-            + &"-".to_owned()
-            + &time.day().to_string()
-            + &" /".to_owned()
-            + &time.hour().to_string()
-            + &":".to_owned()
-            + &time.minute().to_string()
-            + &":".to_owned()
-            + &time.second().to_string()
-            + &"(ms".to_owned()
-            + &time.timestamp_subsec_millis().to_string()
-            + &")".to_owned();
-        return formatstring;
-    }
+    // pub fn stamp() -> String {
+    //     let time = chrono::Utc::now();
+    //     let formatstring = time.year().to_string()
+    //         + &"-".to_owned()
+    //         + &time.month().to_string()
+    //         + &"-".to_owned()
+    //         + &time.day().to_string()
+    //         + &" /".to_owned()
+    //         + &time.hour().to_string()
+    //         + &":".to_owned()
+    //         + &time.minute().to_string()
+    //         + &":".to_owned()
+    //         + &time.second().to_string()
+    //         + &"(ms".to_owned()
+    //         + &time.timestamp_subsec_millis().to_string()
+    //         + &")".to_owned();
+    //     return formatstring;
+    // }
 }
 
 struct Nfile {
@@ -2506,27 +2951,70 @@ struct Nfile {
 }
 
 impl Nfile {
-    // Nscript file stuff
-    pub fn dirtolist(readpath: &str, fullpathnames: bool) -> String {
-        // error handling moet nog gefixed worden.. : als dir niet bestaat.
-        let mut output = String::new();
-        let paths = fs::read_dir(readpath).unwrap();
-        for path in paths {
-            match &path {
-                Ok(_) => {
-                    output = output + &path.unwrap().path().display().to_string() + NC_ARRAY_DELIM;
-                }
-                Err(_) => {
-                    println!("<error>:Cannot find or access directory fn dirtolist()");
-                    return String::new();
+pub fn dirtolist(readpath: &str, fullpathnames: bool) -> String {
+    let mut output = String::new();
+
+    let paths = match fs::read_dir(readpath) {
+        Ok(paths) => paths,
+        Err(error) => {
+            println!("<error>: Cannot read directory: {}", error);
+            return String::new();
+        }
+    };
+
+    for path in paths {
+        match path {
+            Ok(entry) => {
+                let unwraped = entry.path().display().to_string();
+                if !unwraped.is_empty() {
+                    output.push_str(&unwraped);
+                    output.push_str(NC_ARRAY_DELIM);
                 }
             }
+            Err(error) => {
+                println!("<error>: Cannot access directory entry: {}", error);
+                return String::new();
+            }
         }
-        if fullpathnames == false {
-            output = output.replace(readpath, "");
-        }
-        return output;
     }
+
+    if !fullpathnames {
+        output = output.replace(readpath, "");
+    }
+
+    if Nstring::fromright(&output, NC_ARRAY_DELIM.len()) == NC_ARRAY_DELIM {
+        return Nstring::trimright(&output, NC_ARRAY_DELIM.len());
+    }
+
+    output
+}    // Nscript file stuff
+    // pub fn dirtolist(readpath: &str, fullpathnames: bool) -> String {
+    //     // error handling moet nog gefixed worden.. : als dir niet bestaat.
+    //     let mut output = String::new();
+    //     let paths = fs::read_dir(readpath).unwrap();
+    //     for path in paths {
+    //         match &path {
+    //             Ok(_) => {
+    //                 let unwraped = path.unwrap().path().display().to_string();
+    //                 if &unwraped != ""{
+    //                     output = output + &unwraped + NC_ARRAY_DELIM;
+    //                 }
+    //
+    //             }
+    //             Err(_) => {
+    //                 println!("<error>:Cannot find or access directory fn dirtolist()");
+    //                 return String::new();
+    //             }
+    //         }
+    //     }
+    //     if fullpathnames == false {
+    //         output = output.replace(readpath, "");
+    //     }
+    //     if Nstring::fromright(&output, NC_ARRAY_DELIM.len()) == NC_ARRAY_DELIM {
+    //         return Nstring::trimright(&output, NC_ARRAY_DELIM.len());
+    //     }
+    //     return output;
+    // }
     pub fn checkexists(fp: &str) -> bool {
         return std::path::Path::new(fp).exists();
     }
@@ -2546,12 +3034,24 @@ impl Nfile {
 
         String::new()
     }
-
     pub fn read(floc: &str) -> String {
+    let mut file = match File::open(floc) {
+        Ok(file) => file,
+        Err(_) => return String::new(), // Return empty string on error
+    };
+
+    let mut contents = String::new();
+    if let Err(_) = file.read_to_string(&mut contents) {
+        return String::new(); // Return empty string on error
+    }
+
+    kill_bill(&contents)
+    }
+    pub fn readraw(floc: &str) -> String {
         let contents = fs::read_to_string(floc);
         match &contents {
             Err(_e) => String::new(),
-            Ok(t) => String::from(t),
+            Ok(t) => String::from(&read_to_string(&t)),
         }
     }
 }
@@ -2563,6 +3063,10 @@ struct Nstring {
 impl Nstring {
 
     pub fn replace(s: &str, f: &str, r: &str) -> String {
+        if f == "" || s == ""{
+            //println!("debugger cannot replace none?{} by none?{} ",&s,&f);
+            return s.to_string();
+        }
         // i know slaat nergens op.. :P
         return s.replace(f, r);
     }
@@ -2573,8 +3077,11 @@ impl Nstring {
         for is in &r {
             result = result + is + NC_ARRAY_DELIM;
         }
-        let len = result.len();
-        return String::from(&result[0..len - 1]);
+
+        if Nstring::fromright(&result,NC_ARRAY_DELIM.len()) == NC_ARRAY_DELIM {
+            return Nstring::trimright(&result,NC_ARRAY_DELIM.len())
+        }
+        return String::from(&result);
     }
     pub fn instring(s: &str, f: &str) -> bool {
         let mut r = false;
@@ -2654,6 +3161,20 @@ fn sleep(milliseconds: u64) {
     thread::sleep(duration);
 }
 
+fn read_to_string(filename: &str) -> String {//<<-- if IDE says its not used, its a LIE!:w
+
+    let mut file = match File::open(filename) {
+        Ok(file) => file,
+        Err(_) => return String::new(), // Return empty string on error
+    };
+
+    let mut contents = String::new();
+    if let Err(_) = file.read_to_string(&mut contents) {
+        return String::new(); // Return empty string on error
+    }
+
+    contents
+}
 fn hex_to_string(hex_string: &str) -> String {
     match Vec::from_hex(hex_string) {
         Ok(bytes) => String::from_utf8_lossy(&bytes).to_string(),
@@ -2703,7 +3224,6 @@ fn pooladd(pool: &str,entree: &str) -> String{
             found = true;
         }
         newstring = newstring + &entr + NC_ARRAY_DELIM;
-
     }
     if found == false{
         newstring = newstring + &entree + NC_ARRAY_DELIM;
@@ -2723,14 +3243,13 @@ fn poolremove(pool: &str,entree: &str)-> String{
         if entr != entree {
             newstring = newstring + &entr + NC_ARRAY_DELIM;
         }
-
     }
     if Nstring::fromright(&newstring,NC_ARRAY_DELIM.len()) == NC_ARRAY_DELIM {
         newstring = Nstring::trimright(&newstring, NC_ARRAY_DELIM.len());
     }
-
     newstring
 }
+
 fn curl(url: &str) -> String {
     match get(url) {
         Ok(mut response) => {
@@ -2743,9 +3262,334 @@ fn curl(url: &str) -> String {
     }
     String::new()
 }
+
 fn create_directory(dir_path: &str) -> String {
     match fs::create_dir(dir_path) {
         Ok(_) => format!("Directory '{}' created successfully", dir_path),
         Err(err) => format!("Error creating directory: {:?}", err),
     }
 }
+
+fn kill_bill(string: &str) -> String {
+    // function removes the poisoness \r\n crap from satansoft systems and makes the interpreter
+    // clean to run at while being free of evil..
+    Nstring::replace(&string,"\r\n","\n")
+}
+
+fn read_file_utf8(filename: &str) -> String {
+    let mut file = match File::open(filename) {
+        Ok(file) => file,
+        Err(_) => return String::new(),
+    };
+
+    let mut contents = Vec::new();
+    if let Err(_) = file.read_to_end(&mut contents) {
+        return String::new();
+    }
+
+    let (decoded, _, _) = UTF_8.decode(&contents);
+    decoded.into_owned()
+}
+
+fn parse_string_to_usize(input: &str) -> usize {
+    match input.parse::<usize>() {
+        Ok(parsed_number) => parsed_number,
+        Err(_) => 0,
+    }
+}
+
+fn splitselect(arrayvar: &str,delim: &str,entree: usize) -> String{
+    let this = split(&arrayvar,&delim);
+    if entree > this.len()-1 {
+        String::new()
+    }
+    else{
+        return this[entree].to_string()
+    }
+}
+
+fn terminal_get_user_input(message: &str, default: &str) -> String {
+    print!("{} default:[{}]: ", message, default);
+    io::stdout().flush().unwrap(); // Flushes the output to ensure the message is displayed immediately
+
+    let mut input = String::new();
+    io::stdin().read_line(&mut input).expect("Failed to read line");
+
+    // Remove trailing newline character
+    input = input.trim_end().to_string();
+
+    if input.is_empty() {
+        default.to_string()
+    } else {
+        input
+    }
+}
+
+fn round_number(number: &str, decimals: &str) -> String {
+    match (number.parse::<f64>(), decimals.parse::<usize>()) {
+        (Ok(parsed_number), Ok(parsed_decimals)) => {
+            let rounded = parsed_number.round();
+            let formatted = format!("{:.*}", parsed_decimals, rounded);
+            formatted
+        }
+        _ => String::new(),
+    }
+}
+fn filesizebytes(file: &str) -> String {
+    // returns the full byte size of a file!
+    let path = Path::new(file);
+    let metadata = match fs::metadata(path) {
+        Ok(metadata) => metadata,
+        Err(_) => return String::new(),
+    };
+
+    let realsize = metadata.len();
+
+    realsize.to_string()
+}
+
+fn filesize(file: &str) -> String {
+    // returns a fancy calculated string of the size rounded GB/MB/KB
+    let path = Path::new(file);
+    let metadata = match fs::metadata(path) {
+        Ok(metadata) => metadata,
+        Err(_) => return String::new(),
+    };
+
+    let realsize = metadata.len();
+    if realsize >= 1_000_000_000 {
+        return format!("{:.2} GB", realsize as f64 / 1_000_000_000.0);
+    }
+    if realsize >= 1_000_000 {
+        return format!("{:.2} MB", realsize as f64 / 1_000_000.0);
+    }
+    if realsize >= 1_000 {
+        return format!("{:.2} KB", realsize as f64 / 1_000.0);
+    }
+
+    format!("{} B", realsize)
+}
+
+fn arraypush(array: &str,data: &str ) -> String {
+    return "".to_owned() + &array + NC_ARRAY_DELIM + &data
+}
+
+fn arraypushroll(array: &str,data: &str ) -> String {
+    let splitsel = split(&array,NC_ARRAY_DELIM)[0];
+    let striplen = splitsel.len() + NC_ARRAY_DELIM.len();
+    let newarr = "".to_owned() + &array + NC_ARRAY_DELIM + &data;
+    return Nstring::trimleft(&newarr,striplen);
+}
+
+fn arrayfilter(array: &str,tofilter: &str) -> String {
+    let mut ret = String::new();
+    for entree in split(&array,&NC_ARRAY_DELIM) {
+        if Nstring::instring(&entree, &tofilter) == false {
+            ret = "".to_owned() + &ret + &entree+ NC_ARRAY_DELIM;
+        }
+    }
+    if Nstring::fromright(&ret, NC_ARRAY_DELIM.len()) == NC_ARRAY_DELIM {
+        return Nstring::trimright(&ret, NC_ARRAY_DELIM.len());
+    }
+    else{
+        ret
+    }
+}
+
+fn arraysort(array: &str) -> String {
+    let mut strings = split(&array,&NC_ARRAY_DELIM);
+    strings.sort();
+    let mut ret = String::new();
+    for each in strings {
+        ret = ret + &each + &NC_ARRAY_DELIM;
+    }
+    if Nstring::fromright(&ret, NC_ARRAY_DELIM.len()) == NC_ARRAY_DELIM {
+        return Nstring::trimright(&ret, NC_ARRAY_DELIM.len());
+    } else {
+        ret
+    }
+}
+
+fn arraysearch(array: &str,tosearch: &str) -> String{
+    println!("searching array:{} for {}",&array,&tosearch);
+    let mut ret = String::new();
+    for entree in split(&array,&NC_ARRAY_DELIM){
+        if Nstring::instring(&entree, &tosearch){
+            ret = "".to_owned() + &ret + &entree+ NC_ARRAY_DELIM;
+        }
+    }
+    if Nstring::fromright(&ret, NC_ARRAY_DELIM.len()) == NC_ARRAY_DELIM {
+        return Nstring::trimright(&ret, NC_ARRAY_DELIM.len());
+    }
+    else{
+        ret
+    }
+}
+
+fn arrayshuffle(arraystr:&str) -> String{
+    let mut array = split(&arraystr,NC_ARRAY_DELIM);
+    let mut rng = rand::thread_rng();
+    array.shuffle(&mut rng);
+    let mut ret = String::new();
+    for entrees in array{
+        ret = ret + &entrees + NC_ARRAY_DELIM;
+    }
+    if Nstring::fromright(&ret, NC_ARRAY_DELIM.len()) == NC_ARRAY_DELIM {
+        return Nstring::trimright(&ret, NC_ARRAY_DELIM.len());
+    } else {
+        ret
+    }
+
+}
+
+fn random_number_between(min: &str, max: &str, decimals: &str) -> String {
+    let min_num = match min.parse::<f64>() {
+        Ok(parsed_num) => parsed_num,
+        Err(_) => return String::new(),
+    };
+
+    let max_num = match max.parse::<f64>() {
+        Ok(parsed_num) => parsed_num,
+        Err(_) => return String::new(),
+    };
+
+    if min_num > max_num {
+        return String::new();
+    }
+
+    let mut rng = rand::thread_rng();
+    let random_num = rng.gen_range(min_num..=max_num);
+
+    if decimals.is_empty() {
+        return random_num.to_string();
+    }
+
+    let rounded_num = match decimals.parse::<usize>() {
+        Ok(num_decimals) => format!("{:.*}", num_decimals, random_num),
+        Err(_) => return String::new(),
+    };
+
+    rounded_num
+}
+
+// Move a file from the source path to the destination path
+fn filemove(source: &str, destination: &str) -> String {
+    match fs::rename(source, destination) {
+        Ok(_) => format!("File moved successfully"),
+        Err(err) => format!("Error moving file: {}", err),
+    }
+}
+
+// Copy a file from the source path to the destination path
+fn filecopy(source: &str, destination: &str) -> String {
+    match fs::copy(source, destination) {
+        Ok(_) => format!("File copied successfully"),
+        Err(err) => format!("Error copying file: {}", err),
+    }
+}
+
+// Delete a file at the specified path
+fn filedelete(file: &str) -> String {
+    match fs::remove_file(file) {
+        Ok(_) => format!("File deleted successfully"),
+        Err(err) => format!("Error deleting file: {}", err),
+    }
+}
+
+// Delete a directory and all its contents
+fn directory_delete(directory: &str) -> String {
+    match fs::remove_dir_all(directory) {
+        Ok(_) => format!("Directory deleted successfully"),
+        Err(err) => format!("Error deleting directory: {}", err),
+    }
+}
+
+// Move a directory from the source path to the destination path
+fn directory_move(source: &str, destination: &str) -> String {
+    match fs::rename(source, destination) {
+        Ok(_) => format!("Directory moved successfully"),
+        Err(err) => format!("Error moving directory: {}", err),
+    }
+}
+
+fn call_program(command: &str) -> String {
+    let mut parts = command.split_whitespace();
+    let program = parts.next().expect("No program provided");
+    let args: Vec<_> = parts.collect();
+
+    let output = Command::new(program)
+        .args(&args)
+        .output();
+
+    match output {
+        Ok(output) => {
+            if output.status.success() {
+                let stdout = String::from_utf8_lossy(&output.stdout);
+                let stderr = String::from_utf8_lossy(&output.stderr);
+                format!("Program executed successfully.\nStdout: {}\nStderr: {}", stdout, stderr)
+            } else {
+                format!("Program execution failed with exit code: {:?}", output.status.code())
+            }
+        }
+        Err(err) => {
+            format!("Failed to execute program: {}", err)
+        }
+    }
+}
+// fn convert_array<T: std::fmt::Display>(array: &[T]) -> String {
+//     let elements: Vec<String> = array.iter().map(|element| element.to_string()).collect();
+//     format!("{{{}}}", elements.join(", "))
+// }
+//
+// fn dll_open(path: &str) -> Result<*mut c_void, Box<dyn Error>> {
+//     let path_cstring = CString::new(path)?;
+//     let handle = unsafe { libc::dlopen(path_cstring.as_ptr(), libc::RTLD_NOW) };
+//     if handle.is_null() {
+//         Err(format!("Failed to open DLL: {:?}", path).into())
+//     } else {
+//         Ok(handle)
+//     }
+// }
+//
+// fn dll_close(handle: *mut c_void) {
+//     unsafe {
+//         libc::dlclose(handle);
+//     }
+// }
+//
+// fn dllcall(handle: *mut c_void, func_name: &str, args: &[(&str, &str)]) -> Result<String, Box<dyn Error>> {
+//     let func_name_cstring = CString::new(func_name)?;
+//     let func_ptr = unsafe { libc::dlsym(handle, func_name_cstring.as_ptr()) };
+//     if func_ptr.is_null() {
+//         return Err(format!("Failed to find function: {:?}", func_name).into());
+//     }
+//
+//     let func: extern "C" fn(c_int, c_int, c_int, c_int, c_int, c_int, c_int, c_int, c_int, c_int) -> *mut c_int =
+//         unsafe { std::mem::transmute(func_ptr) };
+//
+//     let mut converted_args: [c_int; 10] = [0; 10];
+//     for (i, &(arg_type, arg_value)) in args.iter().enumerate() {
+//         let converted_arg = match arg_type {
+//             "int" => convert_arg(arg_value)?,
+//             _ => return Err(format!("Unsupported argument type: {:?}", arg_type).into()),
+//         };
+//         converted_args[i] = converted_arg;
+//     }
+//
+//     let result_ptr = func(converted_args[0], converted_args[1], converted_args[2], converted_args[3], converted_args[4],
+//                           converted_args[5], converted_args[6], converted_args[7], converted_args[8], converted_args[9]);
+//
+//     let result = unsafe { *result_ptr };
+//     if result == 0 {
+//         return Err("Function call failed".into());
+//     }
+//
+//     let result_array: &[c_int] = unsafe { std::slice::from_raw_parts(result_ptr, result as usize + 1) };
+//
+//     if result_array.len() > 1 {
+//         let array_string = convert_array(&result_array[1..]);
+//         Ok(array_string)
+//     } else {
+//         Ok(result.to_string())
+//     }
+// }
