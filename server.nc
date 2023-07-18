@@ -1,44 +1,41 @@
+//server begin code
 class server {
-    func start() {
+    func start(){
         print("ServerStarted","green")
     }
 
-self.debugmode = debugmode(1)
-restrictionmode(0)
+    func onconnect(clientIP){
+       activitytimer = timerinit()
+makenew = ""
+getlist = ""
+url = ""
+       }
+
+    server.debugmode = debugmode( 1 )
+    server.restrictedmode = restrictionmode(   0)
+    print("ServerScope Executed!!" ,"red" )
+print( "whoooooooooooooooooooooooooooooooooooooooooop" , "green"   )
 }
 
 
-func someswitch(){
-        return "test123"
+throttleMs = 500
+// throttle the server so the powerusage drops. adjust if you like.
+activitytimer = timerinit()
+
+    async "server" {
+
+            if timerdiff(activitytimer) > 10000 {
+                sleep(throttleMs)
+            }
+
+    }
+kaas = "1"
+kont = "1"
+
+kont = match kont {
+    "11" | "2" => print("first","blue")
+    "1" | "123" | kaas => print("second","green")
+    _ => print("third")
+
 }
-func timeformat(timer){
-        timer = combine "[Timer:" timer "]"
-        return timer
-    }
-timed = timerinit()
-server.start()
-color = "red"
-
-
-arr = ["123","456","67"]
-]
-for x to 150 {
-       i = 0 + x
-    }
-whatisit = 4
-if 1 = 1 {
-        print("ja toch of niet dan pik !!!")
-    }
-variable = switch whatisit  {
-    case "test123" {
-
-
-    }
-    case 4    {
-        print("its four")
-        return "tjaaa laag 1"
-
-    }
-}
-
-
+print(kont,"red")

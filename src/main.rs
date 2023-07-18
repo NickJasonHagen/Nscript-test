@@ -80,7 +80,7 @@ use std::env;
 
 const PROGRAM_DIR: &str = env!("CARGO_MANIFEST_DIR");
 const NC_ARRAY_DELIM : &str = "]].n.c.arr.[[";
-const NC_ASYNC_LOOPS_KEY : &str = "while"; // async loops scopes keyword
+const NC_ASYNC_LOOPS_KEY : &str = "async"; // async loops scopes keyword
 
 
 
@@ -229,11 +229,13 @@ impl Varmap {
 
         // Parents and childs
         // add parent to new obj
-        let objparenth =  "nscript_classparents__".to_owned() + &trimmedtoobj;
-        self.setprop(&objparenth, &trimmedobj, "active");
+        let objparenth =  "nscript_classparents__".to_owned() + &trimmedtoobj + "." + trimmedobj;
+        self.setvar(objparenth, ".");
         // add child to parent obj
-        let objchildh =  "nscript_classchilds__".to_owned() + &trimmedobj;
-        self.setprop(&objchildh, &trimmedtoobj, "active");
+        let objchildh =  "nscript_classchilds__".to_owned() + &trimmedobj + "." + &trimmedtoobj;
+        self.setvar(objchildh, ".");
+
+
 
         //vmap.setvar(functionregobj, &funcname); // reg the function to obj
     }
@@ -245,6 +247,7 @@ impl Varmap {
             Some((_i, k)) => k.to_owned()
         }
     }
+
     fn delobj(&mut self,obj: &str){
 
         //delete properties
@@ -263,6 +266,17 @@ impl Varmap {
             //println!("deleting func {}",&prop);
         }
         // delete children/parents register
+        let objparenth =  "nscript_classparents__".to_owned() + &obj;
+        let parents = self.inobj(&objparenth);
+        println!("parents: {}",parents);
+        for eachparent in split(&parents,"|"){
+
+            if eachparent != "" {
+                // remove child from parent obj
+                let objchildh =  "nscript_classchilds__".to_owned() + &eachparent.trim();
+                self.delprop(&objchildh, &obj.trim());
+            }
+        }
     }
     fn delprop(&mut self,obj: &str,key: &str){
         if key == ""{
@@ -288,7 +302,7 @@ impl Varmap {
                 let mut newindex = String::new();
                 for entree in array {
                     if entree != key && entree != "" {
-                        newindex = "".to_owned() + &entree + "|";
+                        newindex = "".to_owned() + &newindex + &entree + "|";
 
                     }
 
@@ -335,10 +349,14 @@ impl Varmap {
                 },
                 Some((_i, k)) => {
                     let tosearch = propname.to_string() + "|";// make sure for search
-                    if Nstring::instring(&k, &propname) == false {
+                    let makesurecheck = "|".to_owned() + &k + "|";
+                    if Nstring::instring(&makesurecheck, &propname) == false {
                         let nexindex = k.to_owned() + "|" + &propname;
                         self.varmap.insert(objprops,nexindex.to_owned());
+//println!("Setvar: index= {}",&nexindex);
                     }
+
+
 
                 }
             }
@@ -414,11 +432,13 @@ impl Varmap {
         }
     }
     fn setprop(&mut self, obj: &str, prop: &str, value: &str) {
-        let fullkey = "obj_".to_owned() + &obj.to_string().trim() + "__" + &prop.to_string().trim();
+        // this shoulnd be used , make the syntax as var.prop and trow it to
+        // setvar() / w getvar
+        let fullkey = "obj_".to_owned() + &obj.trim() + "__" + &prop.trim();
         self.varmap.insert(fullkey, value.trim().to_owned());
 
         // set obj index !!
-        let objprops = "obj_".to_owned() + &obj.trim().to_string(); // index of all the properties - managed
+        let objprops = "obj_".to_owned() + &obj.trim(); // index of all the properties - managed
         let g = self.varmap.get_key_value(prop.trim());
         match g {
             None => {
@@ -607,9 +627,6 @@ fn nscript_checkvar(key: &str,vmap: &mut Varmap) -> String {
                     checkvar_toreturn= vmap.getvar(key);
                     return checkvar_toreturn;
                 }
-
-
-
             }
         }
     }
@@ -617,6 +634,9 @@ fn nscript_checkvar(key: &str,vmap: &mut Varmap) -> String {
 }
 
 fn nscript_getmacro(mac: &str,vmap: &mut Varmap) -> String {
+    //this function calculated and returns macro's / starting with the @ symbol
+    //functional variables.
+    //----------------------------------------------------
     let time = chrono::Utc::now();
     match mac {
         "@webpublic" => SCRIPT_DIR.to_owned() +"domains/" +&split(&vmap.getvar("___domainname"),":")[0]+"/public/",
@@ -634,39 +654,77 @@ fn nscript_getmacro(mac: &str,vmap: &mut Varmap) -> String {
         "@msec" => time.timestamp_millis().to_string(),
         "@socketip" => nscript_checkvar("___socketip",vmap),
         "@nscriptversion" => String::from(NSCRIPT_VERSION),
-        "@crlf" => String::from(LINE_ENDING),
-        "@lf" => String::from(LINE_ENDING),
-        "@emptystring" => String::new(),
+        "@crlf" => String::from("\r\n"),
+        "@lf" => String::from("\n"),
+        "@emptystring" => String::new(),//<- internal-parser used!!
 
         _ => String::from(mac),
     }
 }
 
-fn nscript_switch(entree: &str,scope:&str,vmap: &mut Varmap) -> String {
+fn nscript_match(entree: &str,scope:&str,vmap: &mut Varmap) -> String {
+    // This is the interpreter for the match system
+    // used in parse_line() internally , the return value
+    // will be set if a variable caches it.
+    // ---------------------------------------------------
     let scopeargs = Nstring::stringbetween(&scope, "(", ")");
     let splitscopearg = split(&scopeargs,",");
     let evalentree = nscript_checkvar(entree, vmap);
-
     let switchscope = nscript_unpackscopereturnclean(&splitscopearg[1],&splitscopearg[0],vmap);
-    let splitcase = split(&switchscope,"case ");
+    let splitcase = split(&switchscope,"\n");
     for thiscase in splitcase {
-        let casescope = split(&thiscase," ");
-        if casescope.len() > 1 {
-            let evalvarname = nscript_checkvar(&casescope[0],vmap);
-            //println!("Evalcheck:{} evalcase:{}",&evalvarname,&evalentree);
-            if evalvarname == evalentree {
-//println!("Switch True! scope={}",&casescope[1]);
-
-                 let casescopeargs = Nstring::stringbetween(&casescope[casescope.len() -1], "(", ")");
-                let splitcasescopearg = split(&casescopeargs,",");
-                return nscript_unpackscope(&splitcasescopearg[1],&splitcasescopearg[0],vmap);
-
+        // splitline[0] are checks /[1] return/(scope)
+        let splitline = split(&thiscase," =>");
+        if splitline.len() > 1 {
+            // check multiple by pipes looped
+            let splitstatements = split(&splitline[0]," | ");
+            for eachstatement in splitstatements {
+                let stateeval = nscript_checkvar(&eachstatement, vmap);
+                if stateeval == evalentree || stateeval == "_" {
+                    // check for scope nest
+                    if Nstring::instring(&splitline[1],"scope(") {
+                        // prep and run nest
+                        let casescopeargs = Nstring::stringbetween(&splitline[1], "(", ")");
+                        let splitcasescopearg = split(&casescopeargs,",");
+                        let ret = nscript_unpackscope(&splitcasescopearg[1],&splitcasescopearg[0],vmap);
+                        // check for return (if nests could have em.)
+                        if Nstring::fromleft(&ret,5) == "RET=>" {
+                            return ret;
+                        }
+                        // return the last line's result as return
+                        return "RET=>".to_owned() + &ret; // ensure last return as result
+                    }
+                    else {
+                        // if no scope, 1 word can return
+                        return "RET=>".to_owned() + &nscript_checkvar(&splitline[1].trim(),vmap);
+                    }
+                }
             }
         }
     }
-
-String::new()
+nscript_interpreterdebug("Syntax error on match scope!",vmap.debugmode,vmap.strictness);
+String::new()// in case of full-derp-mode
 }
+
+// fn nscript_switch(entree: &str,scope:&str,vmap: &mut Varmap) -> String {
+//     let scopeargs = Nstring::stringbetween(&scope, "(", ")");
+//     let splitscopearg = split(&scopeargs,",");
+//     let evalentree = nscript_checkvar(entree, vmap);
+//     let switchscope = nscript_unpackscopereturnclean(&splitscopearg[1],&splitscopearg[0],vmap);
+//     let splitcase = split(&switchscope,"case ");
+//     for thiscase in splitcase {
+//         let casescope = split(&thiscase," ");
+//         if casescope.len() > 1 {
+//             let evalvarname = nscript_checkvar(&casescope[0],vmap);
+//             if evalvarname == evalentree {
+//             let casescopeargs = Nstring::stringbetween(&casescope[casescope.len() -1], "(", ")");
+//             let splitcasescopearg = split(&casescopeargs,",");
+//             return nscript_unpackscope(&splitcasescopearg[1],&splitcasescopearg[0],vmap);
+//             }
+//         }
+//     }
+// String::new()
+// }
 
 
 fn nscript_array(entrees: &str,vmap: &mut Varmap ) -> String{
@@ -674,44 +732,53 @@ fn nscript_array(entrees: &str,vmap: &mut Varmap ) -> String{
         let parseall = Nstring::stringbetween(&entrees,"[", "]");
         let delimiter = ",";
 
-     let parsed: Vec<&str> = parseall.split(delimiter).collect();
+        let parsed: Vec<&str> = parseall.split(delimiter).collect();
         let mut returnstring = String::new();
         for each in &parsed {
             if returnstring == "" {
                 returnstring ="".to_owned() + &nscript_checkvar(&each,vmap);
-
             }
             else{
                 returnstring = "".to_owned() + &returnstring + &NC_ARRAY_DELIM + &nscript_checkvar(&each,vmap);
             }
-
         }
         return returnstring;
     }
     return String::new();
-
 }
 
 fn line_to_words(line: &str) -> Vec<&str> {
     line.split_whitespace().collect()
 }
-fn nscript_parsecompiledsheet(coderaw: &str, vmap: &mut Varmap) -> String {
+fn nscript_parseformattedsheet(coderaw: &str, vmap: &mut Varmap) -> String {
     // this function runs a block of scope without jumping up a codelvl
     // this is used for at spot runtime blocks like For,While loops.
     // it is faster for execution then parse_sheet() but it requires nscript_compilesheet()
     // to have preparred the block for proper execution
     // ------------------------------------------------------------------------
+let mut toreturn = String::new();
     let lines = coderaw.split("\n");
     for line in lines {
         if line != "" {
-            let toreturn = &nscript_parseline(&split(&line,"//")[0].trim(), vmap);
-            if Nstring::instring(toreturn, "RET=>") == true {
-               return Nstring::replace(toreturn, "RET=>", "");
+            toreturn = nscript_parseline(&line, vmap);
+            if Nstring::instring(&toreturn, "RET=>") == true {
+               return Nstring::replace(&toreturn, "RET=>", "");
             }
         }
     }
 
-    return String::from("..");
+    return "..".to_owned();
+}
+fn nscript_stripcomments(coderaw: &str) -> String{
+    // strips off all comments per lines.
+    let lines = coderaw.split("\n");
+    let mut newcode = String::new();
+    for line in lines {
+        if line != "" {
+            newcode = newcode + &split(&line,"//")[0].trim()+"\n";
+        }
+    }
+    newcode
 }
 
 fn nscript_parsesheet(coderaw: &str, vmap: &mut Varmap) -> String {
@@ -724,26 +791,27 @@ fn nscript_parsesheet(coderaw: &str, vmap: &mut Varmap) -> String {
     let levelbellow = vmap.codelevel - 1 ;
     let argnewbroken = "".to_owned() + &levelbellow.to_string()  + "__internalparam"; // form new varnames bkgrnd paramx
     let argnewfix = "".to_owned() + &levelbellow.to_string() + "__" + &vmap.codelevel.to_string() + "__internalparam"; // form new varnames bkgrnd paramx
-    //println!("rawcode:{}",&coderaw);
     let code = kill_bill(&Nstring::replace(&coderaw, "internalparam", &argnew));
-
     let code = Nstring::replace(&code, &argnewfix, &argnewbroken);
-    //println!("newcode:{}",&code);
     vmap.codelvlup();
 
     let fixedcode = code.to_owned();// + LINE_ENDING;
-     let fixedcode = trim_lines(&fixedcode);
-     let fixedcode = nscript_stringextract(&fixedcode);
-     let fixedcode  = nscript_scopeextract(&fixedcode);
-    // println!("parsingcode:{}",&fixedcode);
+    let fixedcode = nscript_stripcomments(&fixedcode);
+    let fixedcode = trim_lines(&fixedcode);
+    let fixedcode = nscript_stringextract(&fixedcode);
+let fixedcode = nscript_formatargumentspaces(&fixedcode);
+    let fixedcode  = nscript_scopeextract(&fixedcode);
+
+    //let fixedcode = nscript_compilesheet(&code);
+    //println!("code:{}",&fixedcode);
     let mut toreturn = String::new();
     let lines = fixedcode.split("\n");
     for line in lines {
         if line != "" {
-            let fixedline = split(&line,"//")[0].trim();
-            if fixedline != ""{
-                toreturn = nscript_parseline(&fixedline ,vmap);
-            }
+            //let fixedline = split(&line,"//")[0].trim();
+            //if line != ""{
+                toreturn = nscript_parseline(&line ,vmap);
+            //}
             //  when parse line sees return on word[0] it will add "RET=>"
             // this will break this loop and return the value back to callfn/nscript_func
             if Nstring::fromleft(&toreturn, 5) == "RET=>" {
@@ -754,8 +822,8 @@ fn nscript_parsesheet(coderaw: &str, vmap: &mut Varmap) -> String {
         }
     }
     vmap.codelvldown();
-     // if the loop does not break early and the end of file is reached with no return value
-    return String::from("..");
+
+    return "..".to_owned();
 }
 
 fn nscript_parseline(line: &str, vmap: &mut Varmap) -> String {
@@ -777,6 +845,7 @@ fn nscript_parseline(line: &str, vmap: &mut Varmap) -> String {
             match pref.as_str() {
                 // these are checks for 1 word lines ( internally this can be
                 // triggered without parsesheet()
+
                 "call" => {
                     if Nstring::instring(&words[0],"scope(") { // <----------- interally used
 
@@ -813,6 +882,9 @@ fn nscript_parseline(line: &str, vmap: &mut Varmap) -> String {
                     //unknown
                 }
             };
+            if words[0] == "break" || words[0] == "Break"{ // <== used in loops{}
+                    return "RET=>break".to_owned();
+            }
         }
         2 => {
             // 2 word lines
@@ -834,7 +906,19 @@ fn nscript_parseline(line: &str, vmap: &mut Varmap) -> String {
                     }
                     return String::new();
                 }
+                "loop" => {
+                    let scopeargs = Nstring::stringbetween(&words[1], "(", ")");
+                    let splitscopearg = split(&scopeargs,",");
+                    let loopblock = nscript_formatsheet(&nscript_unpackscopereturnclean(&splitscopearg[1],&splitscopearg[0],vmap));
+                    loop {
 
+                        let ret = nscript_parseformattedsheet(&loopblock, vmap);
+                        if ret == "break" {
+                            break;
+                        }
+                    }
+                    return String::new();
+                }
                 _ => {
                     //return String::new();
                 }
@@ -859,16 +943,16 @@ fn nscript_parseline(line: &str, vmap: &mut Varmap) -> String {
         3 => {
             // lines that be 3 word
             match words[0] {
-                "switch" => {
+                "match" | "Match" => {
 
-                    return nscript_switch(&words[1],&words[2],vmap);
+                    return nscript_match(&words[1],&words[2],vmap);
                 }
                 NC_ASYNC_LOOPS_KEY => {
                     let scopeargs = Nstring::stringbetween(&words[words.len()-1], "(", ")");
                     let splitscopearg = split(&scopeargs,",");
                     let loopref = nscript_checkvar(&words[1],vmap);
 
-                    let loopscope = nscript_compilesheet(&nscript_unpackscopereturnclean(&splitscopearg[1],&splitscopearg[0],vmap));
+                    let loopscope = nscript_formatsheet(&nscript_unpackscopereturnclean(&splitscopearg[1],&splitscopearg[0],vmap));
                     vmap.setvar("nscript_loops".to_owned() + "." + &loopref.trim(), &loopscope);
                     return "".to_owned();
 
@@ -1031,6 +1115,8 @@ fn nscript_parseline(line: &str, vmap: &mut Varmap) -> String {
                     "elseif" =>{
                         if vmap.getvar(&"___if") == "false"{ // last if statement must be false
                             if parse_and_check_statement(&words,vmap){
+                                vmap.setvar("___if".to_owned(),"true"); // <-- set it true so other
+                                // elseifs wont trigger
                                 let scopeargs = Nstring::stringbetween(&words[words.len()-1], "(", ")");
                                 let splitscopearg = split(&scopeargs,",");
                                 return nscript_unpackscope(&splitscopearg[1],&splitscopearg[0],vmap);
@@ -1055,6 +1141,8 @@ fn nscript_parseline(line: &str, vmap: &mut Varmap) -> String {
                     }
 
                     "if" => {
+
+                        //println!("if!");
                         // this handles a statement !
                         if parse_and_check_statement(&words,vmap){
                             //println!("newstatement true !");
@@ -1072,16 +1160,16 @@ fn nscript_parseline(line: &str, vmap: &mut Varmap) -> String {
                        //well not sure yet.
                     }
                 }
-                if words[2] == "switch" && words[1] == "=" {
+                if words[2] == "match" && words[1] == "=" ||  words[2] == "Match" && words[1] == "=" {
                     // this is a switch scope with a variable set.
-                    let switchreturn = nscript_switch(&words[3],&words[4],vmap);
-                    println!("var = switch = {}",switchreturn);
+                    let switchreturn = nscript_match(&words[3],&words[4],vmap);
+                    //println!("var = switch = {}",switchreturn);
                     vmap.setvar(words[0].to_owned(),&Nstring::trimleft(&switchreturn,5));
                     return "".to_owned();
 
                 }
 
-                if words[3] == "+" || words[3] == "-" || words[3] == "*" || words[3] == "/" || words[3] == "*" {
+                if words[3] == "+" || words[3] == "-" || words[3] == "*" || words[3] == "/"  {
                     // this checks the 4th word to be any of the math syntax
                     // if so it will run the line as math,
                     // run_math(array,beginmathfromentree)
@@ -1102,9 +1190,11 @@ fn parse_and_check_statement(words: &[&str], vmap: &mut Varmap) -> bool {
     // they can be mixed And/or
     // this function will return a bool.
     // -------------------------------------------------------------
-    if words.len() < 4 || words[0] != "if" {
-        nscript_interpreterdebug("There is a syntax error on a if statement", vmap.debugmode, vmap.strictness);
-        return false; // Invalid syntax or empty statement
+    if words.len() < 4 {
+            if words[0] == "if" || words[0] == "elseif"{
+            nscript_interpreterdebug("There is a syntax error on a if statement", vmap.debugmode, vmap.strictness);
+            return false; // Invalid syntax or empty statement
+        }
     }
 
     let conditions = &words[3..words.len() - 1];
@@ -1117,9 +1207,7 @@ fn parse_and_check_statement(words: &[&str], vmap: &mut Varmap) -> bool {
         let operator = conditions[index];
         let a = conditions[index + 1];
         let b = conditions[index + 2];
-
         let c = conditions[index + 3];
-
         if operator == "and" || operator == "&&" {
             result = result && nscript_checkstatement(a, b, c, vmap);
         } else if operator == "or" || operator == "||" {
@@ -1127,13 +1215,10 @@ fn parse_and_check_statement(words: &[&str], vmap: &mut Varmap) -> bool {
         } else {
             return false; // Unknown operator or invalid syntax
         }
-
         index += 4;
     }
-
     result
 }
-
 
 fn nscript_foreach(code: &str,invar: &str,inarray: &str,vmap: &mut Varmap) {
     // this function is used for something in array {}
@@ -1144,13 +1229,12 @@ fn nscript_foreach(code: &str,invar: &str,inarray: &str,vmap: &mut Varmap) {
     let evalarray = nscript_checkvar(&inarray,vmap);
     let array = split(&evalarray,&NC_ARRAY_DELIM);
     let scopeid = &Nstring::stringbetween(&code, "scope(", ",");
-    let cleancode = nscript_compilesheet(&nscript_stringextract(&nscript_unpackscopereturnclean(&code, scopeid, vmap)));
+    let cleancode = nscript_formatsheet(&nscript_stringextract(&nscript_unpackscopereturnclean(&code, scopeid, vmap)));
     for isin in array {
         vmap.setvar(invar.to_owned(),&isin);
-        nscript_parsecompiledsheet(&cleancode, vmap);
+        nscript_parseformattedsheet(&cleancode, vmap);
     }
 }
-
 
 fn nscript_forto(code: &str,invar: &str,inarray: &str, vmap: &mut Varmap) {
     // this is a for x to 100 {} system where x represents a number
@@ -1158,14 +1242,12 @@ fn nscript_forto(code: &str,invar: &str,inarray: &str, vmap: &mut Varmap) {
     let evalarray = nscript_checkvar(&inarray,vmap);
     let scopeid = &Nstring::stringbetween(&code, "scope(", ",");
 
-    let cleancode = nscript_compilesheet(&nscript_stringextract(&nscript_unpackscopereturnclean(&code, scopeid, vmap)));
+    let cleancode = nscript_formatsheet(&nscript_stringextract(&nscript_unpackscopereturnclean(&code, scopeid, vmap)));
     for isin in 1..nscript_i32(&evalarray)+1{
         vmap.setvar(invar.to_owned(),&isin.to_string());
-        nscript_parsecompiledsheet(&cleancode, vmap);
+        nscript_parseformattedsheet(&cleancode, vmap);
     }
 }
-
-
 
 fn nscript_checkstatement(a: &str, b: &str, c: &str, vmap: &mut Varmap) -> bool {
     // this is used to check a single statement in nscript.
@@ -1610,6 +1692,9 @@ fn nscript_callfn(
         "run" => {
             return call_program(&param1);
         }
+        // "sqlgetrow" => {
+        //     return perform_sql_query_get_row(&param1,&param2,param3);
+        // }
         // "decrypt" => {
         //     return encrypt_string(&param1,&param2);
         // }
@@ -1617,6 +1702,25 @@ fn nscript_callfn(
         // "encrypt" => {
         //     return decrypt_string(&param1,&param2);
         // }
+        "minutes_in_ms" => {
+            return minutes_in_ms(&param1);
+        }
+        "hours_in_ms" => {
+            return hours_in_ms(&param1);
+        }
+        "days_in_ms" => {
+            return days_in_ms(&param1);
+        }
+        "weeks_in_ms" => {
+            return weeks_in_ms(&param1);
+        }
+        "months_in_ms" => {
+            return months_in_ms(&param1);
+        }
+        "years_in_ms" => {
+            return years_in_ms(&param1);
+        }
+
         "stringtobase64" => {
             return string_to_base64(&param1);
         }
@@ -1630,7 +1734,13 @@ fn nscript_callfn(
         "zip" => {
             return zip_directory(&param1,&param2);
         }
-
+        "objtojson" => {
+            return objtojson(&param1,vmap);
+        }
+        "objfromjson" => {
+            objfromjson(&param1,param2,vmap);
+            return param1.trim().to_owned();
+        }
         "dirdelete" => {
             return directory_delete(&param1);
         }
@@ -1730,7 +1840,7 @@ fn nscript_callfn(
         "objparents" => {
             return vmap.objparents(param1);
         }
-        "objchildren" => {
+        "objchildren" | "getobjchildren"=> {
             return vmap.objchildren(param1);
         }
         "setobjprop" => {
@@ -1775,7 +1885,7 @@ fn nscript_callfn(
         }
         "cwrite" | "print" => {
             cwrite(param1, param2);
-            return String::new();
+            return param1.to_owned();
         }
         "timerinit" => {
             return Timer::init().to_string();
@@ -1798,7 +1908,7 @@ fn nscript_callfn(
             return read_file_utf8(&param1).to_owned();
         }
         "fexists" | "fileexists"=> {
-            if Nfile::checkexists(param1) == true {
+            if Nfile::checkexists(&param1) == true {
                 return String::from("1");
             } else {
                 return String::from("0");
@@ -1932,13 +2042,13 @@ fn cwrite(m: &str, color: &str) {
 fn nscript_func(func: &str, vmap: &mut Varmap) -> String {
     // this is the function wich executes a nscript user made function !
     // -----------------------------------------------------------------
-   let (args, id) = nscript_getarguments(&func, vmap); // get all argument params
+    let (args, id) = nscript_getarguments(&func, vmap); // get all argument params
     let func = func.trim();
     for r in 1..id {
         //let paramx = &r + 1
 
         let pname = "".to_owned() + &vmap.codelevel.to_string() + "__internalparam" + &r.to_string();
-       vmap.setvar(pname, &args[r]); // set all param arguments
+        vmap.setvar(pname, &args[r]); // set all param arguments
     }
     let mut fname = String::from(&args[0]);
 
@@ -1960,10 +2070,13 @@ fn nscript_func(func: &str, vmap: &mut Varmap) -> String {
 
             isclass = Nstring::trimleft(&splitfn[0].trim(), 1);
 
-        } else {
+        }
+
+        else {
             isclass = splitfn[0].trim().to_string().clone();
         }
-       let cleanfnname = split(&splitfn[1], "(");
+
+        let cleanfnname = split(&splitfn[1], "(");
         let mut fnname = String::from(cleanfnname[0].trim());
         let mut reg = "nscript_classfuncs__".to_owned()  + &isclass +"."+ &fnname;
 
@@ -1974,6 +2087,7 @@ fn nscript_func(func: &str, vmap: &mut Varmap) -> String {
 
             //println!("going to check for fn:{}",&fnname);
         }
+
          if Nstring::fromleft(&isclass,1) == "&" {
             isclass = nscript_checkvar(&Nstring::replace(&isclass,"&",""), vmap);
             reg = "nscript_classfuncs__".to_owned()  + &isclass +"."+ &fnname;
@@ -1981,16 +2095,11 @@ fn nscript_func(func: &str, vmap: &mut Varmap) -> String {
             //println!("going to check for class:{}",&isclass);
         }
 
-
-
         let rootfnobj = vmap.getvar(&reg); // get root obj where the func is located.
-
         let rootfnfullname = "".to_owned() + &rootfnobj + "__" + &fnname;//+ &rootfnobj + "__" + &fnname;
         iscodebblock = vmap.getcode(&rootfnfullname); // load code
-
         vmap.stackpush("___self", &isclass);
         vmap.setvar("self".to_owned(), &isclass);
-        //println!("setting self to:[{}]",&isclass);
         usedself = &isclass;
         iscodebblock = Nstring::replace(&iscodebblock, "self.", "&self."); // change all to the obj itself.
    } else {
@@ -2034,12 +2143,18 @@ fn nscript_execute_script(
     let  mut code = read_file_utf8(&file);
     vmap.setcode(&thisparsingsheet,&code);
     nscript_class_scopeextract(vmap);
-    let code = vmap.getcode(&thisparsingsheet);
+     code = vmap.getcode(&thisparsingsheet);
     nscript_func_scopeextract("", vmap);
-    let code = vmap.getcode(&thisparsingsheet);
+     code = vmap.getcode(&thisparsingsheet);
     vmap.parsinglevel = vmap.parsinglevel - 1;
     let thisparsingsheet = "_".to_owned() + &vmap.parsinglevel.to_string() +"__interpretercode";
     let thisparsingsubsheet = "_".to_owned() + &vmap.parsinglevel.to_string() +"__interpretersubcode";
+//     if Nstring::fromleft(&code,5) == "scope" {
+//         let scopeargs = Nstring::stringbetween(&code, "(", ")");
+//         let splitscopearg = split(&scopeargs,",");
+//          code = nscript_formatargumentspaces(&nscript_unpackscopereturnclean(&splitscopearg[1],&splitscopearg[0],vmap));
+// println!("newsheet:{}",code);
+//     }
     let ret = nscript_parsesheet(&code, vmap);
     vmap.setprop("__interpreter","parsingsheet",&thisparsingsheet);
     vmap.setprop("__interpreter","parsingsubsheet",&thisparsingsubsheet);
@@ -2053,18 +2168,18 @@ fn nscript_packscope(code: &str,scopeid: &str) -> String {
     // scopeid is a unique number wich is used to pack the scope, this way each scope can be
     // unpacked sepperatly.
     // --------------------------------------------------------------------------------------
+
     let newid = "%".to_owned() + scopeid + "%";
-        let mut ifcodenew = Nstring::replace(&code, " ", "%id%sp%");
+        let mut ifcodenew = Nstring::replace(&nscript_formatsheet(&code), " ", "%id%sp%");
         ifcodenew = Nstring::replace(&ifcodenew, LINE_ENDING, "%id%lf%");
         ifcodenew = Nstring::replace(&ifcodenew, "(", "%id%bo%");
         ifcodenew = Nstring::replace(&ifcodenew, ")", "%id%bc%");
         ifcodenew = Nstring::replace(&ifcodenew, "{", "%id%cbo%");
         ifcodenew = Nstring::replace(&ifcodenew, "}", "%id%cbc%");
-
         ifcodenew = Nstring::replace(&ifcodenew, ",", "%id%c%");
 
     let ret = " scope(".to_owned() + &scopeid + "," + &Nstring::replace(&ifcodenew, "%id%", &newid) + ")";
- ret
+    ret
 }
 
 fn nscript_unpackscope(code: &str,scopeid: &str,vmap: &mut Varmap) -> String {
@@ -2080,7 +2195,7 @@ fn nscript_unpackscope(code: &str,scopeid: &str,vmap: &mut Varmap) -> String {
     ifcodenew = Nstring::replace(&ifcodenew, "%id%c%",",");
     ifcodenew = Nstring::replace(&ifcodenew, "%id%cbo%","{");
     ifcodenew = Nstring::replace(&ifcodenew, "%id%cbc%","}");
-    let res = nscript_parsecompiledsheet(&nscript_compilesheet(&ifcodenew),vmap);
+    let res = nscript_parseformattedsheet(&ifcodenew,vmap);
     if res ==".." {
         res
     }
@@ -2103,7 +2218,6 @@ fn nscript_unpackscopereturnclean(code: &str,scopeid: &str,vmap: &mut Varmap) ->
     ifcodenew = Nstring::replace(&ifcodenew, "%id%c%",",");
     //println!("BlockUnpack:{}",&ifcodenew);
     ifcodenew
-
 }
 
 fn nscript_scopeextract(text: &str) -> String {
@@ -2138,7 +2252,7 @@ fn nscript_stringextract(text: &str) -> String {
     // nscript_checkvar() will regonise ^3131 formats and unhex them where needed.
     // ------------------------------------------------------------------------
     let mut parsingtext = Nstring::replace(&text.to_string(),"\\\"","#!@NSCRIPTQUOTE#@!");
-parsingtext = Nstring::replace(&parsingtext,"\"\"","@emptystring");
+    parsingtext = Nstring::replace(&parsingtext,"\"\"","@emptystring");
 
     loop {
         let splitstr = Nstring::stringbetween(&parsingtext,"\"","\"");
@@ -2177,8 +2291,8 @@ fn nscript_class_scopeextract(vmap: &mut Varmap){
                 let classnamepart = split(&eachclass, "{")[0];
                 let classname = split(&classnamepart,":");
                 if classname.len() > 1 {
-                    vmap.setvar(classname[1].to_string().clone(), &classname[1]); // assign classname = classname
-                    vmap.setobj(&classname[1], &classname[0]);
+                    vmap.setvar(classname[1].trim().to_string().clone(), &classname[1].trim()); // assign classname = classname
+                    vmap.setobj(&classname[1].trim(), &classname[0].trim());
                 }
                 let block = extract_scope(&eachclass);// extract the class scope between { }
                 vmap.setcode(&parsesubcode,&block);// assign the subscope
@@ -2304,7 +2418,7 @@ fn nscript_func_scopeextract(selfvar: &str,vmap: &mut Varmap) {
                     // let block = trim_lines(&block);
                      let block = nscript_stringextract(&block);
                      let block  = nscript_scopeextract(&block);
-                    vmap.setcode(&classnamefixed, &nscript_compilesheet(&block));
+                    vmap.setcode(&classnamefixed, &nscript_formatsheet(&block));
                     //println!("Setting func: {} \n with block: \n{}",&functionregobj, &block);
                 }
                 else {
@@ -2314,7 +2428,7 @@ fn nscript_func_scopeextract(selfvar: &str,vmap: &mut Varmap) {
                      let block = nscript_stringextract(&block);
                     // let block  = nscript_scopeextract(&block);
 
-                    vmap.setcode(&classname, &nscript_compilesheet(&block));
+                    vmap.setcode(&classname, &nscript_formatsheet(&block));
                 }
                 let toreplace = "func ".to_owned() + & split(&eachclass, "{")[0] +  &cleanblock ;
 
@@ -2331,65 +2445,44 @@ fn nscript_func_scopeextract(selfvar: &str,vmap: &mut Varmap) {
 }
 
 }
-fn nscript_compilesheet(code: &str) -> String{
+fn nscript_formatsheet(code: &str) -> String{
     // this function preformats a sheet and these can be run with nscript_parsecompiledsheet()
     // used in : For / While / func
     // ------------------------------------------------------------------------------
-    let mut newcode = String::new();
-    let lines = code.split(LINE_ENDING);
-    for line in lines {
-        let fxline = split(&line,"//")[0];
-        newcode = "".to_owned() + &newcode + &fxline + LINE_ENDING;
-    }
-    nscript_scopeextract(&nscript_stringextract(&trim_lines(&kill_bill(&newcode))))
+    // let mut newcode = String::new();
+    // let lines = code.split(LINE_ENDING);
+    // for line in lines {
+    //     let fxline = split(&line,"//")[0];
+    //     newcode = "".to_owned() + &newcode + &fxline + LINE_ENDING;
+    // }
+    nscript_scopeextract(&nscript_formatargumentspaces(&nscript_stringextract(&trim_lines(&kill_bill(&nscript_stripcomments(&code))))))
 }
-fn nscript_loop_scopeextract(selfvar: &str,vmap: &mut Varmap) {
-    let parsecode;
-    if selfvar == "" {
-
-         parsecode = vmap.getprop("__interpreter","parsingsheet");
-
-    }
-    else {
-        parsecode = vmap.getprop("__interpreter","parsingsubsheet");
-        //println!("Code=={}",&parsecode)
-
-    }
-
-    let code = vmap.getcode(&parsecode);
-    let keyword = "".to_owned() + NC_ASYNC_LOOPS_KEY +" ";
-    let classes = split(&code,&keyword);
-    let mut i = 0; //<-- serves to filter first split wich isnt if found but default.
-    if classes.len() > 1 {
-        for eachclass in classes {
-            if i > 0 {
-                if eachclass != "" {
-                    let mut classname = split(&eachclass, "{")[0].to_owned();
-                    let block = extract_scope(&eachclass);
-
-                    if Nstring::instring(&classname,"&") {
-                        classname = nscript_checkvar(&Nstring::replace(&classname, "&", ""), vmap);
-                    }
-
-                    let toreplace = keyword.to_owned() + &classname +  &block ;
-                    //parsingtext = Nstring::replace(&parsingtext, &toreplace,"" );
-                    if selfvar != "" {
-                        vmap.setvar("nscript_loops".to_owned() + "." + &classname.trim(), &Nstring::replace(&block,"self","&self"));
-
-                    }
-                    else{
-                        vmap.setvar("nscript_loops".to_owned() + "." + &classname.trim(), &block);
 
 
-                    }
-                    vmap.setcode(&parsecode,&Nstring::replace(&code, &toreplace,"" ));
-                    //println!("funccode:{}",&toreplace);
-                }
-            }
-            i += 1;
+fn nscript_formatargumentspaces(code: &str) -> String{
+    let mut line = String::new(); // buffer used for changes
+    let mut fixed = String::new();// used to return
+    let mut linebuf = String::new();
+    let fixemptyargscode = Nstring::replace(&code,"()","(\"\")");
+    for each in split(&fixemptyargscode,"\n"){ // loop lines
+        line = each.to_string(); // set default
+        linebuf = line.clone(); // create a buffer we can strip
+        loop {
+            let getbetween = Nstring::stringbetween(&linebuf,"(",")");
+            //check if "" means its done.
+            if getbetween == "" {break}
+            // create a fixed string
+            let fixbetween = Nstring::replace(&getbetween," ","");
+            line = Nstring::replace(&line,&getbetween,&fixbetween);
+            // strip the buf from what its done, and loop on.
+            let  bufstrip = split(&linebuf,&getbetween);
+            let tostrip = bufstrip[0].to_owned() +   &getbetween ;
+            linebuf = Nstring::replace(&linebuf,&tostrip,"");
+
         }
+        fixed = fixed + &line + "\n";
     }
-
+    fixed
 }
 
 fn extract_scope(text: &str) -> String {
@@ -2427,6 +2520,42 @@ fn extract_scope(text: &str) -> String {
     }
 }
 
+//
+// fn extract_arumentscope(text: &str) -> String {
+//     // a internal function to fix spaces and enters from long functions
+//     // -------------------------------
+//     let mut stack = Vec::new();
+//     let mut start = None;
+//     let mut end = None;
+//     let mut depth = 0;
+//
+//     for (index, ch) in text.char_indices() {
+//         match ch {
+//             '(' => {
+//                 if stack.is_empty() {
+//                     start = Some(index);
+//                 }
+//                 stack.push(ch);
+//                 depth += 1;
+//             }
+//             ')' => {
+//                 stack.pop();
+//                 depth -= 1;
+//                 if stack.is_empty() && depth == 0 {
+//                     end = Some(index + 1);
+//                     break;
+//                 }
+//             }
+//             _ => {}
+//         }
+//     }
+//
+//     match (start, end) {
+//         (Some(start), Some(end)) => text[start..end].to_string(),
+//         _ => String::new(),
+//     }
+// }
+//
 fn nscript_funcextract(text: &str,vmap: &mut Varmap) -> String {
     // this function will extract and run nested functions from inner to outer
     // it will return 1 function back with all the arguments as evaluated nscript syntaxis,
@@ -2567,13 +2696,25 @@ fn handle_connection(mut stream: TcpStream,  vmap: &mut Varmap) {
     let mut buffer = [0; 1024];
     stream.read(&mut buffer).unwrap();
     let request = String::from_utf8_lossy(&buffer[..]);
-    //println!("http={}",&request);
-    let domainname = Nstring::stringbetween(&request,"Host: ","\n");
+    //let request_clone = request.clone();
+    let domainname = Nstring::stringbetween(&request,"Host: ","\r\n");
+    let domainname = split(&domainname,":")[0];
     vmap.setvar("___domainname".to_owned(),&domainname);
     let request_parts: Vec<&str> = request.split(" ").collect();
-    let pathparts = split(&request_parts[1][1..],"?");
+    let mut pathparts = Vec::new();
+    if request_parts.len() > 1 {
+        pathparts = split(&request_parts[1][1..],"?");
+    }
+    else{
+
+            pathparts.push("");
+    }
+    if pathparts[0] == ""{
+        pathparts[0] = "index.nc";
+    }
+
+
     let mut url_args = Vec::new();
-    //let mut newparams = Vec::new();
     if pathparts.len() > 1 {
         url_args = split(pathparts[1], "&");
     }
@@ -2590,126 +2731,160 @@ fn handle_connection(mut stream: TcpStream,  vmap: &mut Varmap) {
     }
 
     nscript_setparams_handleconnections(&newparams,vmap);
+
     let mut file_path = format!("{}{}", SERVER_ROOT, &pathparts[0]);
+        let checkthis = SCRIPT_DIR.to_owned() + "domains/" + &domainname + "/http.nc";
+        if Nfile::checkexists(&checkthis){
+            file_path = SCRIPT_DIR.to_owned() + "domains/"  + &domainname + "/public/"+ &pathparts[0];
 
-
-    let checkthis = SCRIPT_DIR.to_owned() + "domains/" + &split(&vmap.getvar("___domainname"),":")[0]+"/http.nc";
-    if Nfile::checkexists(&checkthis){
-        file_path = SCRIPT_DIR.to_owned() + "domains/"  + &split(&vmap.getvar("___domainname"),":")[0]+"/public/"+&pathparts[0];
-
-    }
-    //println!("filepath = [{}]",&file_path);
-
+        }
+  if request_parts[0] == "GET" {
     if let Some(extension) = Path::new(&file_path).extension().and_then(|os_str| os_str.to_str().map(|s| s.to_owned())) {
-        if ["jpg", "jpeg", "png", "gif"].contains(&extension.as_str()) {
-            let file_path_clone = file_path.clone(); // clone file_path
-            thread::spawn(move || {
-                let mut file = File::open(&file_path_clone).unwrap();
-                let mut contents = Vec::new();
-                file.read_to_end(&mut contents).unwrap();
-                let content_type = match extension.as_str() {
-                    "jpg" | "jpeg" => "image/jpeg",
-                    "png" => "image/png",
-                    "gif" => "image/gif",
-                    _ => "application/octet-stream"
-                };
-                let response = format!("HTTP/2.1 200 OK\r\nContent-Type: {}\r\nContent-Length: {}\r\n\r\n", content_type, contents.len());
-                stream.write(response.as_bytes()).unwrap();
-                stream.write(&contents).unwrap();
-            });
-            return;
-        }
-    }
-    let mut file = match File::open(&file_path) {
-        Ok(file) => file,
-        Err(_) => {
-            let response = format!("HTTP/1.1 404 NOT FOUND\r\n\r\n");
+        if ["nc"].contains(&extension.as_str()) {
+            let _ = match File::open(&file_path) {
+                Ok(_) => {},
+                Err(_) => {
+                    let response = format!("HTTP/1.1 404 NOT FOUND\r\n\r\n");
+                    stream.write(response.as_bytes()).unwrap();
+                    return;
+                }
+            };
+            let scriptcode = read_file_utf8(&file_path);
+            let compcode = nscript_formatsheet(&nscript_stringextract(&scriptcode));
+            let ret = nscript_parsesheet(&compcode, vmap);
+            nscript_clearparams_handleconnections(vmap);
+            let response = format!("HTTP/1.1 200 OK\r\nContent-Type: {}\r\nContent-Length: {}\r\n\r\n", "text/html", &ret.len());
             stream.write(response.as_bytes()).unwrap();
-            //println!("is 404");
+            stream.write(&ret.as_bytes()).unwrap();
             return;
+
         }
-    };
-    let mut contents = Vec::new();
-    file.read_to_end(&mut contents).unwrap();
-   let isnc = Nstring::instring(&file_path,".nc");
-    let content_type = match Path::new(&file_path).extension().unwrap().to_str().unwrap() {
-        "html" => "text/html",
-        "css" => "text/css",
-        "nc" => "text/html",
-        "js" => "application/javascript",
-        "txt" => "text/plain",
-        _ => "application/octet-stream"
-    };
-
-    if isnc {
-
-        let scriptcode = read_file_utf8(&file_path);
-        //println!("scriptcode:{}",&scriptcode);
-        //let ret = nscript_execute_script(&scriptcode,newparams[0],newparams[1],newparams[2],newparams[3],newparams[4],newparams[5],newparams[6],newparams[7],newparams[8],vmap);
-        let compcode = nscript_compilesheet(&nscript_stringextract(&scriptcode));
-
-        let ret = nscript_parsesheet(&compcode, vmap);
-        nscript_clearparams_handleconnections(vmap);
-        //cwrite(&ret,&"red");
-        //
-        let response = format!("HTTP/1.1 200 OK\r\nContent-Type: {}\r\nContent-Length: {}\r\n\r\n", content_type, &ret.len());
-        stream.write(response.as_bytes()).unwrap();
-        stream.write(&ret.as_bytes()).unwrap();
-    }
-    else {
-        let response = format!("HTTP/1.1 200 OK\r\nContent-Type: {}\r\nContent-Length: {}\r\n\r\n", content_type, contents.len());
-        stream.write(response.as_bytes()).unwrap();
-        stream.write(&contents).unwrap();
-
-    }
-
-
-}
-#[cfg(windows)]
-fn set_nonblocking<T: AsRawSocket>(socket: &T) -> Result<(), io::Error> {
-    use std::os::windows::raw::c_ulong;
-    use std::os::windows::io::FromRawSocket;
-
-    let raw_socket = socket.as_raw_socket() as SOCKET;
-    let mut nonblocking: c_ulong = 1;
-    let result = unsafe { ioctlsocket(raw_socket, FIONBIO, &mut nonblocking) };
-    if result != 0 {
-        return Err(io::Error::last_os_error());
-    }
-    Ok(())
-}
-
-#[cfg(windows)]
-fn ioctlsocket(socket: SOCKET, cmd: c_long, argp: *mut c_ulong) -> i32 {
-    unsafe {
-        ioctlsocket::ioctlsocket(socket, cmd, argp)
+        let file_path_clone = file_path.clone(); // clone file_path
+        thread::spawn(move || {
+            let mut file = match File::open(&file_path_clone) {
+                Ok(file) => file,
+                Err(_) => {
+                    let response = format!("HTTP/1.1 404 NOT FOUND\r\n\r\n");
+                    stream.write(response.as_bytes()).unwrap();
+                    return;
+                }
+            };
+            let mut contents = Vec::new();
+            file.read_to_end(&mut contents).unwrap();
+            let content_type = match extension.as_str() {
+                "jpg" | "jpeg" => "image/jpeg",
+                "png" => "image/png",
+                "gif" => "image/gif",
+                "js" => "application/javascript",
+                "txt" => "text/plain",
+                "html" => "text/html",
+                "css" => "text/css",
+                _ => "application/octet-stream"
+            };
+            let response = format!("HTTP/2.1 200 OK\r\nContent-Type: {}\r\nContent-Length: {}\r\n\r\n", content_type, contents.len());
+            stream.write(response.as_bytes()).unwrap();
+            stream.write(&contents).unwrap();
+        });
+        return;
     }
 }
 
-#[cfg(not(windows))]
-fn set_nonblocking(socket: &TcpListener) -> Result<(), io::Error> {
-    // Linux-specific implementation
-    socket.set_nonblocking(true)?;
-    Ok(())
+
 }
+
+// fn handlepost(){// <------------------------------------ Need to be worked in handle connection
+// still.
+//
+//      if request_parts[0] == "POST" {
+//         let mut stream_clone = stream.try_clone().unwrap();
+//         // Check if the file path has the ".nc" extension
+//         if let Some(extension) = Path::new(&file_path).extension().and_then(|os_str| os_str.to_str().map(|s| s.to_owned())) {
+//             if extension == "nc" {
+//                 // Spawn a new thread to handle the file upload
+//                 let request_clone = request.clone();
+//                 let file_path_clone = file_path.clone();
+//                 thread::spawn(move || {
+//                     // Read the request body (file data) until the end
+//                     let mut boundary = String::new();
+//                     if Nstring::stringbetween(&request_clone, "boundary=", "\r\n") != "" {
+//                         let boundary_str = &Nstring::stringbetween(&request_clone, "boundary=", "\r\n");
+//                         boundary = boundary_str.to_owned();
+//
+//                     }
+//
+//                     // Process each part of the multipart form data
+//                     let mut part_start_delimiter = format!("\r\n--{}\r\n", &boundary).into_bytes();
+//                     let mut part_end_delimiter = format!("\r\n--{}--\r\n", &boundary).into_bytes();
+//
+//                     let mut bufferupload = [0; 1024];
+//                     let mut received_data = Vec::new();
+//
+//                     loop {
+//                         let bytes_read = stream_clone.read(&mut bufferupload).unwrap();
+//                         if bytes_read == 0 {
+//                             break;
+//                         }
+//
+//                         received_data.extend_from_slice(&bufferupload[..bytes_read]);
+//
+//                         // Check if the received data contains the part start or end delimiter
+//                         if received_data.windows(part_start_delimiter.len()).any(|window| window == &part_start_delimiter[..])
+//                         || received_data.windows(part_end_delimiter.len()).any(|window| window == &part_end_delimiter[..]) {
+//                             // Process the part (file data)
+//                             let part_data = received_data.clone();
+//
+//                             // Extract necessary information from the part data and perform custom logic
+//                             let content_type = Nstring::stringbetween(&request_clone, "Content-Type: ", "\r\n");
+//                             let filename = Nstring::stringbetween(&request_clone, "filename=\"", "\"");
+//
+//                             // Write the file data to a specific directory
+//                             let output_dir = "./testfiles/uploads";
+//                             let output_path = format!("{}/{}", output_dir, filename);
+//                             let mut file = File::create(output_path).unwrap();
+//                             file.write_all(&part_data).unwrap();
+//
+//                             // Perform additional logic specific to MP3 files
+//                             // For example, you can extract metadata, process audio, etc.
+//
+//                             // Send the response back to the client
+//                             let response = format!("HTTP/1.1 200 OK\r\nContent-Type: {}\r\n\r\n", "text/plain");
+//                             let message = "File upload for .nc file completed.";
+//                             let response = format!("{}{}", response, message);
+//                             stream_clone.write(response.as_bytes()).unwrap();
+//                             return;
+//                         }
+//                     }
+//                 });
+//                 return;
+//             }
+//         }
+//     }
+// }
 //----------------RegionNscript------------------/\--------------
 fn main() -> std::io::Result<()>  {
 //send_message_to_discord_api()
     let mut vmap = Varmap::new(); // global
 
-    println!("Starting fn main() Nscript v2.00Wip");
+    println!("Starting fn main() Nscript {}",NSCRIPT_VERSION);
     println!("____________________________________");
 
     let listener = TcpListener::bind(format!("{}:{}", SERVER_ADDRESS, SERVER_PORT)).unwrap();
-    set_nonblocking(&listener)?;
+
+    // sets the
+    // acceptsocketlisterns to continue and not hold on the script
+
+    #[cfg(windows)]
+    listener.set_nonblocking(true).expect("Cannot set non-blocking");
+    #[cfg(not(windows))]
+    listener.set_nonblocking(true)?;
+
     println!("Server started at http://{}:{}", SERVER_ADDRESS, SERVER_PORT);
     let serverscriptfilename = SCRIPT_DIR.to_owned() +"server.nc";
-
     let domaindir = SCRIPT_DIR.to_owned() +"domains/";
     let domdir = Nfile::dirtolist(&domaindir,false);
     let domaindirarr = split(&domdir,NC_ARRAY_DELIM);
 
-
+vmap.setvar("self".to_owned(),"server");
     nscript_execute_script(&serverscriptfilename,"","","","","","","","","",&mut vmap);
 
 
@@ -2719,7 +2894,7 @@ fn main() -> std::io::Result<()>  {
     for domainscript in domaindirarr {
         if domainscript != ""{
             vmap.setvar("___domainname".to_owned(),&domainscript);
-            let domainscript = SCRIPT_DIR.to_owned() + "domains/"+domainscript + "/http.nc";
+            let domainscript = SCRIPT_DIR.to_owned() + "domains/"+domainscript.trim() + "/http.nc";
 
 
             nscript_execute_script(&domainscript,"","","","","","","","","",&mut vmap);
@@ -2737,7 +2912,9 @@ fn main() -> std::io::Result<()>  {
             Ok((stream, _)) => {
                 let remote_ip = stream.peer_addr().unwrap().ip();
                 vmap.setvar("___thissocketip".to_owned(),&remote_ip.to_string());
-                println!("Client connecting:{}",remote_ip.to_string());
+                let onconfunc = "server.onconnect(\"".to_owned() + &remote_ip.to_string()+ "\")";
+                nscript_checkvar(&onconfunc,&mut vmap);
+                //println!("Client connecting:{}",remote_ip.to_string());
 
                 handle_connection(stream,&mut vmap);
             }
@@ -2858,7 +3035,7 @@ fn nscript_loops(vmap: &mut Varmap) {
             let d = vmap.getprop("nscript_loops", &x);
             vmap.stackpush("___self", &x);
             vmap.setvar("self".to_owned(), &x);
-            nscript_parsecompiledsheet(&d, vmap);
+            nscript_parseformattedsheet(&d, vmap);
             vmap.stackpop("___self");
             vmap.setvar("self".to_owned(), &x);
 
@@ -2872,60 +3049,6 @@ fn split<'a>(s: &'a str, p: &str) -> Vec<&'a str> {
     return r;
 }
 
-struct Timer {
-
-}
-
-impl Timer {
-    pub fn diff(timerhandle: i64) -> i64 {
-        let getnow = Timer::init();
-        let diff = getnow - timerhandle;
-        return diff;
-    }
-    pub fn init() -> i64 {
-        let time = chrono::Utc::now();
-        let mut timerstring = String::from(&time.year().to_string());
-        if &time.month() < &10 {
-            timerstring = timerstring + "0" + &time.month().to_string();
-        } else {
-            timerstring = timerstring + &time.month().to_string();
-        }
-        // check day for 2 characters
-        if &time.day() < &10 {
-            timerstring = timerstring + "0" + &time.day().to_string();
-        } else {
-            timerstring = timerstring + &time.day().to_string();
-        }
-        // check hour for 2 characters
-        if &time.hour() < &10 {
-            timerstring = timerstring + "0" + &time.hour().to_string();
-        } else {
-            timerstring = timerstring + &time.hour().to_string();
-        }
-        // check minute for 2 characters
-        if &time.minute() < &10 {
-            timerstring = timerstring + "0" + &time.minute().to_string();
-        } else {
-            timerstring = timerstring + &time.minute().to_string();
-        }
-        // check second for 2 characters
-        if &time.second() < &10 {
-            timerstring = timerstring + "0" + &time.second().to_string();
-        } else {
-            timerstring = timerstring + &time.second().to_string();
-        }
-        // check milisecond for 3 characters
-        if &time.timestamp_subsec_millis() < &100 {
-            if &time.timestamp_subsec_millis() < &10 {
-                timerstring = timerstring + "00" + &time.timestamp_subsec_millis().to_string();
-            } else {
-                timerstring = timerstring + "0" + &time.timestamp_subsec_millis().to_string();
-            }
-        } else {
-            timerstring = timerstring + &time.timestamp_subsec_millis().to_string();
-        }
-        return timerstring.parse::<i64>().unwrap();
-    }
     // pub fn stamp() -> String {
     //     let time = chrono::Utc::now();
     //     let formatstring = time.year().to_string()
@@ -2944,77 +3067,50 @@ impl Timer {
     //         + &")".to_owned();
     //     return formatstring;
     // }
-}
+//}
 
 struct Nfile {
     // nscript filesystem
 }
 
 impl Nfile {
-pub fn dirtolist(readpath: &str, fullpathnames: bool) -> String {
-    let mut output = String::new();
+    pub fn dirtolist(readpath: &str, fullpathnames: bool) -> String {
+        let mut output = String::new();
 
-    let paths = match fs::read_dir(readpath) {
-        Ok(paths) => paths,
-        Err(error) => {
-            println!("<error>: Cannot read directory: {}", error);
-            return String::new();
-        }
-    };
-
-    for path in paths {
-        match path {
-            Ok(entry) => {
-                let unwraped = entry.path().display().to_string();
-                if !unwraped.is_empty() {
-                    output.push_str(&unwraped);
-                    output.push_str(NC_ARRAY_DELIM);
-                }
-            }
+        let paths = match fs::read_dir(readpath) {
+            Ok(paths) => paths,
             Err(error) => {
-                println!("<error>: Cannot access directory entry: {}", error);
+                println!("<error>: Cannot read directory: {}", error);
                 return String::new();
             }
+        };
+
+        for path in paths {
+            match path {
+                Ok(entry) => {
+                    let unwraped = entry.path().display().to_string();
+                    if !unwraped.is_empty() {
+                        output.push_str(&unwraped);
+                        output.push_str(NC_ARRAY_DELIM);
+                    }
+                }
+                Err(error) => {
+                    println!("<error>: Cannot access directory entry: {}", error);
+                    return String::new();
+                }
+            }
         }
-    }
 
-    if !fullpathnames {
-        output = output.replace(readpath, "");
-    }
+        if !fullpathnames {
+            output = output.replace(readpath, "");
+        }
 
-    if Nstring::fromright(&output, NC_ARRAY_DELIM.len()) == NC_ARRAY_DELIM {
-        return Nstring::trimright(&output, NC_ARRAY_DELIM.len());
-    }
+        if Nstring::fromright(&output, NC_ARRAY_DELIM.len()) == NC_ARRAY_DELIM {
+            return Nstring::trimright(&output, NC_ARRAY_DELIM.len());
+        }
 
-    output
-}    // Nscript file stuff
-    // pub fn dirtolist(readpath: &str, fullpathnames: bool) -> String {
-    //     // error handling moet nog gefixed worden.. : als dir niet bestaat.
-    //     let mut output = String::new();
-    //     let paths = fs::read_dir(readpath).unwrap();
-    //     for path in paths {
-    //         match &path {
-    //             Ok(_) => {
-    //                 let unwraped = path.unwrap().path().display().to_string();
-    //                 if &unwraped != ""{
-    //                     output = output + &unwraped + NC_ARRAY_DELIM;
-    //                 }
-    //
-    //             }
-    //             Err(_) => {
-    //                 println!("<error>:Cannot find or access directory fn dirtolist()");
-    //                 return String::new();
-    //             }
-    //         }
-    //     }
-    //     if fullpathnames == false {
-    //         output = output.replace(readpath, "");
-    //     }
-    //     if Nstring::fromright(&output, NC_ARRAY_DELIM.len()) == NC_ARRAY_DELIM {
-    //         return Nstring::trimright(&output, NC_ARRAY_DELIM.len());
-    //     }
-    //     return output;
-    // }
+        output
+    }
     pub fn checkexists(fp: &str) -> bool {
         return std::path::Path::new(fp).exists();
     }
@@ -3056,7 +3152,7 @@ pub fn dirtolist(readpath: &str, fullpathnames: bool) -> String {
     }
 }
 
-struct Nstring {
+pub struct Nstring {
     // Nscript String stuff
 }
 
@@ -3153,7 +3249,22 @@ pub fn stringbetween<'a>(str: &'a str, a: &str, b: &str) -> String {
     }
     "".to_owned()
 }
+    pub fn stringbetweenincludeempty<'a>(str: &'a str, a: &str, b: &str) -> String {
+        // used for interal usage to extraxt scopes, if a scope is empty its still a scope.
+        // iteratrs shoulnd exit then so this funtion retuns something else
+        // to let the iterator know to continue instead of a empty string.
+        // ---------------------------------------
+        if let Some(start_pos) = str.find(a) {
+        let rest = &str[start_pos + a.len()..];
+        if let Some(end_pos) = rest.find(b) {
+            let extracted = &rest[..end_pos];
+            //return extracted.trim_start_matches(|c: char| c.is_whitespace()).trim_end_matches(|c: char| c.is_whitespace()).to_string();
 
+                return extracted.to_string();
+        }
+    }
+    "<nonefound!>".to_owned()
+}
 }
 
 fn sleep(milliseconds: u64) {
@@ -3175,28 +3286,6 @@ fn read_to_string(filename: &str) -> String {//<<-- if IDE says its not used, it
 
     contents
 }
-fn hex_to_string(hex_string: &str) -> String {
-    match Vec::from_hex(hex_string) {
-        Ok(bytes) => String::from_utf8_lossy(&bytes).to_string(),
-        Err(_) => String::new(),
-    }
-}
-
-fn string_to_hex(input: &str) -> String {
-    let hex_chars: Vec<char> = "0123456789ABCDEF".chars().collect();
-    let bytes = input.as_bytes();
-    let mut hex_string = String::new();
-
-    for byte in bytes {
-        let high_nibble = (byte & 0xF0) >> 4;
-        let low_nibble = byte & 0x0F;
-        hex_string.push(hex_chars[high_nibble as usize]);
-        hex_string.push(hex_chars[low_nibble as usize]);
-    }
-
-    hex_string
-}
-
 fn string_to_eval(string_: &str) -> String {
     let mut return_val = string_.to_string();
 
@@ -3276,263 +3365,29 @@ fn kill_bill(string: &str) -> String {
     Nstring::replace(&string,"\r\n","\n")
 }
 
-fn read_file_utf8(filename: &str) -> String {
-    let mut file = match File::open(filename) {
-        Ok(file) => file,
-        Err(_) => return String::new(),
-    };
+fn objtojson(obj: &str,vmap: &mut Varmap) -> String{
+    let mut jsonstring = String::from("{");
+    for propname in split(&vmap.inobj(&obj),"|"){
+        let nscriptvar = obj.to_owned() + "." + &propname;
+        jsonstring = jsonstring + "\"" + &propname + "\": \"" + &vmap.getvar(&nscriptvar) + "\"," ;
 
-    let mut contents = Vec::new();
-    if let Err(_) = file.read_to_end(&mut contents) {
-        return String::new();
     }
-
-    let (decoded, _, _) = UTF_8.decode(&contents);
-    decoded.into_owned()
+    if Nstring::fromright(&jsonstring,1) == "," {
+        jsonstring = Nstring::trimright(&jsonstring,1);
+    }
+    jsonstring = jsonstring + "}";
+    jsonstring
 }
 
-fn parse_string_to_usize(input: &str) -> usize {
-    match input.parse::<usize>() {
-        Ok(parsed_number) => parsed_number,
-        Err(_) => 0,
-    }
-}
-
-fn splitselect(arrayvar: &str,delim: &str,entree: usize) -> String{
-    let this = split(&arrayvar,&delim);
-    if entree > this.len()-1 {
-        String::new()
-    }
-    else{
-        return this[entree].to_string()
-    }
-}
-
-fn terminal_get_user_input(message: &str, default: &str) -> String {
-    print!("{} default:[{}]: ", message, default);
-    io::stdout().flush().unwrap(); // Flushes the output to ensure the message is displayed immediately
-
-    let mut input = String::new();
-    io::stdin().read_line(&mut input).expect("Failed to read line");
-
-    // Remove trailing newline character
-    input = input.trim_end().to_string();
-
-    if input.is_empty() {
-        default.to_string()
-    } else {
-        input
-    }
-}
-
-fn round_number(number: &str, decimals: &str) -> String {
-    match (number.parse::<f64>(), decimals.parse::<usize>()) {
-        (Ok(parsed_number), Ok(parsed_decimals)) => {
-            let rounded = parsed_number.round();
-            let formatted = format!("{:.*}", parsed_decimals, rounded);
-            formatted
-        }
-        _ => String::new(),
-    }
-}
-fn filesizebytes(file: &str) -> String {
-    // returns the full byte size of a file!
-    let path = Path::new(file);
-    let metadata = match fs::metadata(path) {
-        Ok(metadata) => metadata,
-        Err(_) => return String::new(),
-    };
-
-    let realsize = metadata.len();
-
-    realsize.to_string()
-}
-
-fn filesize(file: &str) -> String {
-    // returns a fancy calculated string of the size rounded GB/MB/KB
-    let path = Path::new(file);
-    let metadata = match fs::metadata(path) {
-        Ok(metadata) => metadata,
-        Err(_) => return String::new(),
-    };
-
-    let realsize = metadata.len();
-    if realsize >= 1_000_000_000 {
-        return format!("{:.2} GB", realsize as f64 / 1_000_000_000.0);
-    }
-    if realsize >= 1_000_000 {
-        return format!("{:.2} MB", realsize as f64 / 1_000_000.0);
-    }
-    if realsize >= 1_000 {
-        return format!("{:.2} KB", realsize as f64 / 1_000.0);
-    }
-
-    format!("{} B", realsize)
-}
-
-fn arraypush(array: &str,data: &str ) -> String {
-    return "".to_owned() + &array + NC_ARRAY_DELIM + &data
-}
-
-fn arraypushroll(array: &str,data: &str ) -> String {
-    let splitsel = split(&array,NC_ARRAY_DELIM)[0];
-    let striplen = splitsel.len() + NC_ARRAY_DELIM.len();
-    let newarr = "".to_owned() + &array + NC_ARRAY_DELIM + &data;
-    return Nstring::trimleft(&newarr,striplen);
-}
-
-fn arrayfilter(array: &str,tofilter: &str) -> String {
-    let mut ret = String::new();
-    for entree in split(&array,&NC_ARRAY_DELIM) {
-        if Nstring::instring(&entree, &tofilter) == false {
-            ret = "".to_owned() + &ret + &entree+ NC_ARRAY_DELIM;
-        }
-    }
-    if Nstring::fromright(&ret, NC_ARRAY_DELIM.len()) == NC_ARRAY_DELIM {
-        return Nstring::trimright(&ret, NC_ARRAY_DELIM.len());
-    }
-    else{
-        ret
-    }
-}
-
-fn arraysort(array: &str) -> String {
-    let mut strings = split(&array,&NC_ARRAY_DELIM);
-    strings.sort();
-    let mut ret = String::new();
-    for each in strings {
-        ret = ret + &each + &NC_ARRAY_DELIM;
-    }
-    if Nstring::fromright(&ret, NC_ARRAY_DELIM.len()) == NC_ARRAY_DELIM {
-        return Nstring::trimright(&ret, NC_ARRAY_DELIM.len());
-    } else {
-        ret
-    }
-}
-
-fn arraysearch(array: &str,tosearch: &str) -> String{
-    println!("searching array:{} for {}",&array,&tosearch);
-    let mut ret = String::new();
-    for entree in split(&array,&NC_ARRAY_DELIM){
-        if Nstring::instring(&entree, &tosearch){
-            ret = "".to_owned() + &ret + &entree+ NC_ARRAY_DELIM;
-        }
-    }
-    if Nstring::fromright(&ret, NC_ARRAY_DELIM.len()) == NC_ARRAY_DELIM {
-        return Nstring::trimright(&ret, NC_ARRAY_DELIM.len());
-    }
-    else{
-        ret
-    }
-}
-
-fn arrayshuffle(arraystr:&str) -> String{
-    let mut array = split(&arraystr,NC_ARRAY_DELIM);
-    let mut rng = rand::thread_rng();
-    array.shuffle(&mut rng);
-    let mut ret = String::new();
-    for entrees in array{
-        ret = ret + &entrees + NC_ARRAY_DELIM;
-    }
-    if Nstring::fromright(&ret, NC_ARRAY_DELIM.len()) == NC_ARRAY_DELIM {
-        return Nstring::trimright(&ret, NC_ARRAY_DELIM.len());
-    } else {
-        ret
-    }
-
-}
-
-fn random_number_between(min: &str, max: &str, decimals: &str) -> String {
-    let min_num = match min.parse::<f64>() {
-        Ok(parsed_num) => parsed_num,
-        Err(_) => return String::new(),
-    };
-
-    let max_num = match max.parse::<f64>() {
-        Ok(parsed_num) => parsed_num,
-        Err(_) => return String::new(),
-    };
-
-    if min_num > max_num {
-        return String::new();
-    }
-
-    let mut rng = rand::thread_rng();
-    let random_num = rng.gen_range(min_num..=max_num);
-
-    if decimals.is_empty() {
-        return random_num.to_string();
-    }
-
-    let rounded_num = match decimals.parse::<usize>() {
-        Ok(num_decimals) => format!("{:.*}", num_decimals, random_num),
-        Err(_) => return String::new(),
-    };
-
-    rounded_num
-}
-
-// Move a file from the source path to the destination path
-fn filemove(source: &str, destination: &str) -> String {
-    match fs::rename(source, destination) {
-        Ok(_) => format!("File moved successfully"),
-        Err(err) => format!("Error moving file: {}", err),
-    }
-}
-
-// Copy a file from the source path to the destination path
-fn filecopy(source: &str, destination: &str) -> String {
-    match fs::copy(source, destination) {
-        Ok(_) => format!("File copied successfully"),
-        Err(err) => format!("Error copying file: {}", err),
-    }
-}
-
-// Delete a file at the specified path
-fn filedelete(file: &str) -> String {
-    match fs::remove_file(file) {
-        Ok(_) => format!("File deleted successfully"),
-        Err(err) => format!("Error deleting file: {}", err),
-    }
-}
-
-// Delete a directory and all its contents
-fn directory_delete(directory: &str) -> String {
-    match fs::remove_dir_all(directory) {
-        Ok(_) => format!("Directory deleted successfully"),
-        Err(err) => format!("Error deleting directory: {}", err),
-    }
-}
-
-// Move a directory from the source path to the destination path
-fn directory_move(source: &str, destination: &str) -> String {
-    match fs::rename(source, destination) {
-        Ok(_) => format!("Directory moved successfully"),
-        Err(err) => format!("Error moving directory: {}", err),
-    }
-}
-
-fn call_program(command: &str) -> String {
-    let mut parts = command.split_whitespace();
-    let program = parts.next().expect("No program provided");
-    let args: Vec<_> = parts.collect();
-
-    let output = Command::new(program)
-        .args(&args)
-        .output();
-
-    match output {
-        Ok(output) => {
-            if output.status.success() {
-                let stdout = String::from_utf8_lossy(&output.stdout);
-                let stderr = String::from_utf8_lossy(&output.stderr);
-                format!("Program executed successfully.\nStdout: {}\nStderr: {}", stdout, stderr)
-            } else {
-                format!("Program execution failed with exit code: {:?}", output.status.code())
-            }
-        }
-        Err(err) => {
-            format!("Failed to execute program: {}", err)
+fn objfromjson(obj: &str,json: &str,vmap: &mut Varmap){
+    let json = Nstring::trimright(&Nstring::trimleft(&json,1),1); // strip {}
+    for each in split(&json,"\",") {
+        let splitprop = split(&each,"\": \"");
+        if splitprop.len() > 1 {
+            let nscriptprop = "".to_owned()+ &obj.trim() + "."+ &Nstring::trimleft(&splitprop[0],1);
+            println!("setting [{}] with data[{}]",&nscriptprop,&splitprop[1]);
+            //vmap.setvar(nscriptprop.to_owned(),&splitprop[1].trim());
+            vmap.setprop(&obj.trim(),&Nstring::trimleft(&splitprop[0],1),&splitprop[1]);
         }
     }
 }
