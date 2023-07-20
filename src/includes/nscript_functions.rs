@@ -117,78 +117,6 @@ pub fn filesize(file: &str) -> String {
     format!("{} B", realsize)
 }
 
-pub fn arraypush(array: &str,data: &str ) -> String {
-    return "".to_owned() + &array + NC_ARRAY_DELIM + &data
-}
-
-pub fn arraypushroll(array: &str,data: &str ) -> String {
-    let splitsel = split(&array,NC_ARRAY_DELIM)[0];
-    let striplen = splitsel.len() + NC_ARRAY_DELIM.len();
-    let newarr = "".to_owned() + &array + NC_ARRAY_DELIM + &data;
-    return Nstring::trimleft(&newarr,striplen);
-}
-
-pub fn arrayfilter(array: &str,tofilter: &str) -> String {
-    let mut ret = String::new();
-    for entree in split(&array,&NC_ARRAY_DELIM) {
-        if Nstring::instring(&entree, &tofilter) == false {
-            ret = "".to_owned() + &ret + &entree+ NC_ARRAY_DELIM;
-        }
-    }
-    if Nstring::fromright(&ret, NC_ARRAY_DELIM.len()) == NC_ARRAY_DELIM {
-        return Nstring::trimright(&ret, NC_ARRAY_DELIM.len());
-    }
-    else{
-        ret
-    }
-}
-
-pub fn arraysort(array: &str) -> String {
-    let mut strings = split(&array,&NC_ARRAY_DELIM);
-    strings.sort();
-    let mut ret = String::new();
-    for each in strings {
-        ret = ret + &each + &NC_ARRAY_DELIM;
-    }
-    if Nstring::fromright(&ret, NC_ARRAY_DELIM.len()) == NC_ARRAY_DELIM {
-        return Nstring::trimright(&ret, NC_ARRAY_DELIM.len());
-    } else {
-        ret
-    }
-}
-
-pub fn arraysearch(array: &str,tosearch: &str) -> String{
-    //println!("searching array:{} for {}",&array,&tosearch);
-    let mut ret = String::new();
-    for entree in split(&array,&NC_ARRAY_DELIM){
-        if Nstring::instring(&entree, &tosearch){
-            ret = "".to_owned() + &ret + &entree+ NC_ARRAY_DELIM;
-        }
-    }
-    if Nstring::fromright(&ret, NC_ARRAY_DELIM.len()) == NC_ARRAY_DELIM {
-        return Nstring::trimright(&ret, NC_ARRAY_DELIM.len());
-    }
-    else{
-        ret
-    }
-}
-
-pub fn arrayshuffle(arraystr:&str) -> String{
-    let mut array = split(&arraystr,NC_ARRAY_DELIM);
-    let mut rng = rand::thread_rng();
-    array.shuffle(&mut rng);
-    let mut ret = String::new();
-    for entrees in array{
-        ret = ret + &entrees + NC_ARRAY_DELIM;
-    }
-    if Nstring::fromright(&ret, NC_ARRAY_DELIM.len()) == NC_ARRAY_DELIM {
-        return Nstring::trimright(&ret, NC_ARRAY_DELIM.len());
-    } else {
-        ret
-    }
-
-}
-
 pub fn random_number_between(min: &str, max: &str, decimals: &str) -> String {
     let min_num = match min.parse::<f64>() {
         Ok(parsed_num) => parsed_num,
@@ -219,45 +147,7 @@ pub fn random_number_between(min: &str, max: &str, decimals: &str) -> String {
     rounded_num
 }
 
-// Move a file from the source path to the destination path
-pub fn filemove(source: &str, destination: &str) -> String {
-    match fs::rename(source, destination) {
-        Ok(_) => format!("File moved successfully"),
-        Err(err) => format!("Error moving file: {}", err),
-    }
-}
 
-// Copy a file from the source path to the destination path
-pub fn filecopy(source: &str, destination: &str) -> String {
-    match fs::copy(source, destination) {
-        Ok(_) => format!("File copied successfully"),
-        Err(err) => format!("Error copying file: {}", err),
-    }
-}
-
-// Delete a file at the specified path
-pub fn filedelete(file: &str) -> String {
-    match fs::remove_file(file) {
-        Ok(_) => format!("File deleted successfully"),
-        Err(err) => format!("Error deleting file: {}", err),
-    }
-}
-
-// Delete a directory and all its contents
-pub fn directory_delete(directory: &str) -> String {
-    match fs::remove_dir_all(directory) {
-        Ok(_) => format!("Directory deleted successfully"),
-        Err(err) => format!("Error deleting directory: {}", err),
-    }
-}
-
-// Move a directory from the source path to the destination path
-pub fn directory_move(source: &str, destination: &str) -> String {
-    match fs::rename(source, destination) {
-        Ok(_) => format!("Directory moved successfully"),
-        Err(err) => format!("Error moving directory: {}", err),
-    }
-}
 
 pub fn call_program(command: &str) -> String {
     let mut parts = command.split_whitespace();
@@ -283,103 +173,67 @@ pub fn call_program(command: &str) -> String {
         }
     }
 }
-
-pub struct Timer {
-
+pub fn split<'a>(s: &'a str, p: &str) -> Vec<&'a str> {
+    let r: Vec<&str> = s.split(p).collect();
+    //println!("{:?}", &r);
+    return r;
 }
 
-impl Timer {
-    pub fn diff(timerhandle: i64) -> i64 {
-        let getnow = Timer::init();
-        let diff = getnow - timerhandle;
-        return diff;
-    }
-    pub fn init() -> i64 {
-        let time = chrono::Utc::now();
-        let mut timerstring = String::from(&time.year().to_string());
-        if &time.month() < &10 {
-            timerstring = timerstring + "0" + &time.month().to_string();
-        } else {
-            timerstring = timerstring + &time.month().to_string();
+pub fn cwrite(m: &str, color: &str) {
+    // this is more a linux then a windows feature.
+    // as for windows powershell is just lame. itl work but dont expect all colors to show!
+    // --------------------------------------------
+    match color {
+        "bright blue" | "bb" => {
+            println!("{}", m.bright_blue());
         }
-        // check day for 2 characters
-        if &time.day() < &10 {
-            timerstring = timerstring + "0" + &time.day().to_string();
-        } else {
-            timerstring = timerstring + &time.day().to_string();
+        "bright green" | "bg"=> {
+            println!("{}", m.bright_green());
         }
-        // check hour for 2 characters
-        if &time.hour() < &10 {
-            timerstring = timerstring + "0" + &time.hour().to_string();
-        } else {
-            timerstring = timerstring + &time.hour().to_string();
+        "bright cyan" | "bc" => {
+            println!("{}", m.bright_cyan());
         }
-        // check minute for 2 characters
-        if &time.minute() < &10 {
-            timerstring = timerstring + "0" + &time.minute().to_string();
-        } else {
-            timerstring = timerstring + &time.minute().to_string();
+        "bright red" | "br" => {
+            println!("{}", m.bright_red());
         }
-        // check second for 2 characters
-        if &time.second() < &10 {
-            timerstring = timerstring + "0" + &time.second().to_string();
-        } else {
-            timerstring = timerstring + &time.second().to_string();
+        "bright magenta" | "bm" => {
+            println!("{}", m.bright_magenta());
         }
-        // check milisecond for 3 characters
-        if &time.timestamp_subsec_millis() < &100 {
-            if &time.timestamp_subsec_millis() < &10 {
-                timerstring = timerstring + "00" + &time.timestamp_subsec_millis().to_string();
-            } else {
-                timerstring = timerstring + "0" + &time.timestamp_subsec_millis().to_string();
-            }
-        } else {
-            timerstring = timerstring + &time.timestamp_subsec_millis().to_string();
+        "bright yellow" | "by" => {
+            println!("{}", m.bright_yellow());
         }
-        return timerstring.parse::<i64>().unwrap();
-    }
-}
-pub fn hex_to_string(hex_string: &str) -> String {
-    match Vec::from_hex(hex_string) {
-        Ok(bytes) => String::from_utf8_lossy(&bytes).to_string(),
-        Err(_) => String::new(),
-    }
-}
+        "bright purple" | "bp" => {
+            println!("{}", m.bright_purple());
+        }
+        "purple" | "p" => {
+            println!("{}", m.purple());
+        }
+        "cyan" | "c" =>{
+            println!("{}", m.cyan());
+        }
+        "yellow" | "y" => {
+            println!("{}", m.yellow());
+        }
+        "red" | "r" => {
+            println!("{}", m.red());
+        }
+        "green" | "g" => {
+            println!("{}", m.green());
+        }
+        "blue" | "b" =>{
+            println!("{}", m.blue());
+        }
+        "magenta" | "m" =>{
+            println!("{}", m.magenta());
+        }
 
-pub fn string_to_hex(input: &str) -> String {
-    let hex_chars: Vec<char> = "0123456789ABCDEF".chars().collect();
-    let bytes = input.as_bytes();
-    let mut hex_string = String::new();
-
-    for byte in bytes {
-        let high_nibble = (byte & 0xF0) >> 4;
-        let low_nibble = byte & 0x0F;
-        hex_string.push(hex_chars[high_nibble as usize]);
-        hex_string.push(hex_chars[low_nibble as usize]);
-    }
-
-    hex_string
+        _ => {
+            println!("{}", m);
+        }
+    };
 }
 
 
-pub fn hours_in_ms(time: &str) -> String {
-   return "".to_owned() + &(nscript_f64(&time)* nscript_f64(&"3600000")).to_string() ;
-}
-pub fn minutes_in_ms(time: &str) -> String {
-   return "".to_owned() + &(nscript_f64(&time)* nscript_f64(&"60000")).to_string() ;
-}
-pub fn days_in_ms(time: &str) -> String {
-   return "".to_owned() + &(nscript_f64(&time)* nscript_f64(&"86400000")).to_string() ;
-}
-pub fn weeks_in_ms(time: &str) -> String {
-   return "".to_owned() + &(nscript_f64(&time)* nscript_f64(&"604800000")).to_string() ;
-}
-pub fn months_in_ms(time: &str) -> String {
-   return "".to_owned() + &(nscript_f64(&time)* nscript_f64(&"2629800000")).to_string() ;
-}
-pub fn years_in_ms(time: &str) -> String {
-   return "".to_owned() + &(nscript_f64(&time)* nscript_f64(&"31557600000")).to_string() ;
-}
 // pub fn perform_sql_query_get_row(query: &str, getrow: &str,database: &str) -> String {
 //     let conn = Connection::open(database).unwrap();
 //     let mut stmt = conn.prepare(query).unwrap();

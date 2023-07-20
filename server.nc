@@ -5,20 +5,22 @@ class server {
     }
 
     func onconnect(clientIP){
-       activitytimer = timerinit()
-makenew = ""
-getlist = ""
-url = ""
+        activitytimer = timerinit()
+        makenew = ""
+        getlist = ""
+        url = ""
        }
 
     server.debugmode = debugmode( 1 )
     server.restrictedmode = restrictionmode(   0)
     print("ServerScope Executed!!" ,"red" )
-print( "whoooooooooooooooooooooooooooooooooooooooooop" , "green"   )
+self.ip = "0.0.0.0"
+self.port = 8088
+
 }
 
 
-throttleMs = 500
+throttleMs = 50
 // throttle the server so the powerusage drops. adjust if you like.
 activitytimer = timerinit()
 
@@ -29,13 +31,4 @@ activitytimer = timerinit()
             }
 
     }
-kaas = "1"
-kont = "1"
 
-kont = match kont {
-    "11" | "2" => print("first","blue")
-    "1" | "123" | kaas => print("second","green")
-    _ => print("third")
-
-}
-print(kont,"red")
