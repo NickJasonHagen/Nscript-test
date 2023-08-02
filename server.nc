@@ -12,19 +12,20 @@ class server {
        }
 
     server.debugmode = debugmode( 1 )
-    server.restrictedmode = restrictionmode(   0)
+    server.restrictedmode = restrictionmode(0)
     print("ServerScope Executed!!" ,"red" )
-self.ip = "0.0.0.0"
-self.port = 8088
-
+    self.ip = "0.0.0.0"
+    self.port = 8088
+self.POSTbytesmax = 1024 * 20
 }
 
-
+print(run("ffmpeg -i ./in.mkv ./test.mkv"),"blue")
+print("doneRendering","bg")
 throttleMs = 50
 // throttle the server so the powerusage drops. adjust if you like.
 activitytimer = timerinit()
-
-    async "server" {
+serv = "server"
+    async serv {
 
             if timerdiff(activitytimer) > 10000 {
                 sleep(throttleMs)

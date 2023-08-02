@@ -64,13 +64,13 @@ mod ioctlsocket {
     }
 }
 
-#[cfg(not(windows))]
-use std::os::unix::io::AsRawFd;
-const NSCRIPT_VERSION: &'static str = "v2.002";
-const NSCRIPT_INFO: &'static str = "
-Nscript core in Rust-language.
-Created by Nick Hagen.
-2022-23";
+//#[cfg(not(windows))]
+//use std::os::unix::io::AsRawFd;
+const NSCRIPT_VERSION: &'static str = "v2.004";
+// const NSCRIPT_INFO: &'static str = "
+// Nscript core in Rust-language.
+// Created by Nick Hagen.
+// 2022-23";
 #[cfg(windows)]
 const LINE_ENDING: &'static str = "\n";
 #[cfg(not(windows))]
@@ -101,7 +101,7 @@ use std::env;
 
 fn main() -> std::io::Result<()>  {
 
-       let args: Vec<String> = env::args().collect();
+       //let args: Vec<String> = env::args().collect();
 
     // The first argument (index 0) is the name of the binary itself.
     // The actual command-line arguments start from index 1.

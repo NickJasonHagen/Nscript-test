@@ -185,20 +185,38 @@ pub fn handle_connection(mut stream: TcpStream,  vmap: &mut Varmap) {
     // .nc files are being regonised and they will return their return results to the user browser.
     // --------------------------------------------------------------------------------------
     let mut buffer = [0; 1024];
-    stream.read(&mut buffer).unwrap();
+    //stream.read(&mut buffer).unwrap();
+
+
+    match stream.read(&mut buffer) {
+        Ok(_) => {
+            // procceed the connection.
+
+        }
+        Err(_) => {
+            // handle OS error on connection-reset
+            //println!("stream read error ! ");
+            return;
+        }
+    }
     let request = String::from_utf8_lossy(&buffer[..]);
+    //println!("req:{}",&request);
     //let request_clone = request.clone();
     let domainname = Nstring::stringbetween(&request,"Host: ","\r\n");
     let domainname = split(&domainname,":")[0];
     vmap.setvar("___domainname".to_owned(),&domainname);
     let request_parts: Vec<&str> = request.split(" ").collect();
+//if request_parts[0] != "GET" {return;} // debugger to find that damn crash on b blobdata.
     let mut pathparts = Vec::new();
     if request_parts.len() > 1 {
+        if request_parts[1].contains("B blob data]") {
+            return ; // Ignore blob data and return without processing
+        }
         pathparts = split(&request_parts[1][1..],"?");
     }
     else{
 
-            pathparts.push("");
+        pathparts.push("");
     }
     if pathparts[0] == ""{
         pathparts[0] = "index.nc";
@@ -223,14 +241,111 @@ pub fn handle_connection(mut stream: TcpStream,  vmap: &mut Varmap) {
 
     nscript_setparams_handleconnections(&newparams,vmap);
 
-    let mut file_path = format!("{}{}", SERVER_ROOT, &pathparts[0]);
+    let mut file_path = Nstring::replace(&format!("{}{}", SERVER_ROOT, &pathparts[0]),"/..","");
         let checkthis = SCRIPT_DIR.to_owned() + "domains/" + &domainname + "/http.nc";
         if Nfile::checkexists(&checkthis){
             file_path = SCRIPT_DIR.to_owned() + "domains/"  + &domainname + "/public/"+ &pathparts[0];
 
+    }
+    if request_parts[0] == "POST" {
+        let mut postdata = String::new();
+
+        let strippostdata = split(&request,"deflate\r\n\r\n");
+        if strippostdata.len() > 1 {
+            postdata = "".to_owned() +strippostdata[1] ;// used for post buffer data
+            //println!("strippedpostdata:{}",&postdata);
         }
-  if request_parts[0] == "GET" {
-    if let Some(extension) = Path::new(&file_path).extension().and_then(|os_str| os_str.to_str().map(|s| s.to_owned())) {
+        else {
+            return;//some jacked up post request being done.
+        }
+
+
+        if let Some(extension) = Path::new(&file_path).extension().and_then(|os_str| os_str.to_str().map(|s| s.to_owned())) {
+            if ["nc"].contains(&extension.as_str()) {
+                //println!("Its a Post to Nc");
+                let response =  "HTTP/1.1 200 OK\r\nContent-Type: text/html\r\n\r\n";
+                match stream.write(response.as_bytes()) {
+                    Ok(bytes_written) => {
+                        // Check if all bytes were successfully written.
+                        if bytes_written < response.len() {
+                            // Handle the situation where not all data was written if needed.
+                        }
+
+                    }
+                    Err(_) => {
+                        //return;
+                    }
+                }
+                let bsize = nscript_f64(&Nstring::stringbetween(&request,"Content-Length: ","Cache").trim());
+                if bsize > nscript_f64(&nscript_checkvar("server.POSTbytesmax",vmap)){
+                    let response = "SERVERERROR:PostSizeExceedsLimit";
+                    match stream.write(response.as_bytes()) {
+                    Ok(_) => {
+                            return;
+                    }
+                    Err(_) => {
+                        return;
+                    }
+                }
+                                    }
+                //println!("bytesize:{}",&bsize);
+                if bsize > 454.0 {
+                    loop{
+                        match stream.read(&mut buffer) {
+                            Ok(bytes_read) => {
+
+                                //println!("\nbytesRead!{}\n",bytes_read);
+                                postdata = postdata + &String::from_utf8_lossy(&buffer[..]);
+                                if bytes_read == 0 || bytes_read < 1024 {break;}
+
+                                // procceed the connection.
+
+                            }
+                            Err(_) => {
+                                break;
+                                // handle OS error on connection-reset
+
+                            }
+                        }
+                    }
+                }
+
+
+                let url_args = split(&postdata, "&");
+                let mut newparams: Vec<String> = Vec::new();
+
+                for i in 1..10 {
+                    if url_args.len()  > i - 1 {
+                        newparams.push(decode_html_url(&url_args[i-1].to_owned()));
+                    }
+                    else {
+                        newparams.push(String::from(""));
+                    }
+                }
+                nscript_setparams_handleconnections(&newparams,vmap);
+                let scriptcode = read_file_utf8(&file_path);
+                let compcode = nscript_formatsheet(&nscript_stringextract(&scriptcode));
+                let response = nscript_parsesheet(&nscript_replaceparams(&compcode,"param"), vmap);
+                match stream.write(response.as_bytes()) {
+                    Ok(bytes_written) => {
+                        // Check if all bytes were successfully written.
+                        if bytes_written < response.len() {
+                            // Handle the situation where not all data was written if needed.
+                        }
+
+                    }
+                    Err(_) => {
+                        //return;
+                    }
+                }
+                //println!("post: {}",postdata);
+
+            }
+            return;
+        }
+    }
+    if request_parts[0] == "GET" {
+        if let Some(extension) = Path::new(&file_path).extension().and_then(|os_str| os_str.to_str().map(|s| s.to_owned())) {
         if ["nc"].contains(&extension.as_str()) {
             let _ = match File::open(&file_path) {
                 Ok(_) => {},
@@ -241,13 +356,33 @@ pub fn handle_connection(mut stream: TcpStream,  vmap: &mut Varmap) {
                 }
             };
             let scriptcode = read_file_utf8(&file_path);
-            let compcode = nscript_formatsheet(&nscript_stringextract(&scriptcode));
-            let ret = nscript_parsesheet(&compcode, vmap);
-            nscript_clearparams_handleconnections(vmap);
-            let response = format!("HTTP/1.1 200 OK\r\nContent-Type: {}\r\nContent-Length: {}\r\n\r\n", "text/html", &ret.len());
-            stream.write(response.as_bytes()).unwrap();
-            stream.write(&ret.as_bytes()).unwrap();
-            return;
+                let compcode = nscript_formatsheet(&nscript_stringextract(&scriptcode));
+                let ret = nscript_parsesheet(&nscript_replaceparams(&compcode,"param"), vmap);// <-- enables param usage param1 param2 etc.
+                nscript_clearparams_handleconnections(vmap);
+                let response = format!("HTTP/1.1 200 OK\r\nContent-Type: {}\r\nContent-Length: {}\r\n\r\n", "text/html", &ret.len());
+                match stream.write(response.as_bytes()) {
+                    Ok(bytes_written) => {
+                        // Check if all bytes were successfully written.
+                        if bytes_written < response.len() {
+                            // Handle the situation where not all data was written if needed.
+                        }
+                    }
+                    Err(_) => {
+                        return;
+                    }
+                }
+                match stream.write(ret.as_bytes()) {
+                    Ok(bytes_written) => {
+                        // Check if all bytes were successfully written.
+                        if bytes_written < response.len() {
+                            // Handle the situation where not all data was written if needed.
+                        }
+                    }
+                    Err(_) => {
+                        return;
+                    }
+                }
+                return;
 
         }
         let file_path_clone = file_path.clone(); // clone file_path
@@ -273,8 +408,29 @@ pub fn handle_connection(mut stream: TcpStream,  vmap: &mut Varmap) {
                 _ => "application/octet-stream"
             };
             let response = format!("HTTP/2.1 200 OK\r\nContent-Type: {}\r\nContent-Length: {}\r\n\r\n", content_type, contents.len());
-            stream.write(response.as_bytes()).unwrap();
-            stream.write(&contents).unwrap();
+match stream.write(response.as_bytes()) {
+    Ok(bytes_written) => {
+        // Check if all bytes were successfully written.
+        if bytes_written < response.len() {
+            eprintln!("Not all data was written to the stream.");
+            // Handle the situation where not all data was written if needed.
+        }
+    }
+    Err(error) => {
+        return;
+    }
+}
+            match stream.write(&contents) {
+    Ok(bytes_written) => {
+        // Check if all bytes were successfully written.
+        if bytes_written < contents.len() {
+            // Handle the situation where not all data was written if needed.
+        }
+    }
+    Err(error) => {
+        return;
+    }
+}
         });
         return;
     }

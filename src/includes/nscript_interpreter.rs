@@ -401,8 +401,13 @@ pub fn nscript_execute_script(
     vmap.setprop("__interpreter","parsingsubsheet",&thisparsingsubsheet);
     let argusvec: Vec<String> = vec![param1.to_owned(),param2.to_owned(), param3.to_owned(), param4.to_owned(), param5.to_owned(), param6.to_owned(), param7.to_owned(), param8.to_owned(), param9.to_owned()];
     nscript_setparams_exec(&argusvec,vmap);
-
-    let  mut code = read_file_utf8(&file);
+    let mut code = String::new();
+    if Nstring::fromleft(&code,4) == "RAW>" {
+        code = Nstring::trimleft(&file,4);
+    }
+    else{
+        code = read_file_utf8(&file);
+    }
     vmap.setcode(&thisparsingsheet,&code);
     //extract the functions and classes from the sheet.
     nscript_class_scopeextract(vmap);
@@ -2107,7 +2112,7 @@ pub fn trim_lines(input: &str) -> String {
 
 
 
-pub fn nscript_loops(vmap: &mut Varmap) {
+pub fn nscript_loops(vmap: &mut Varmap){
     let activeloops = vmap.inobj("nscript_loops");
 
     if activeloops != "" {
@@ -2180,3 +2185,40 @@ pub fn objfromjson(obj: &str,json: &str,vmap: &mut Varmap){
     }
 }
 
+pub fn nscript_replaceparams(code: &str,thisargument: &str) -> String{
+    // this can be used to make sure that there no unintended replacements,
+    // these bellow should be in my view the only appliable ways to suit the var.
+    let mut block = code.to_owned();
+    let param = "\n".to_owned() + "internalparam"  +  " ";
+    let torep = "\n".to_owned() + &thisargument +" ";
+    block = Nstring::replace(&block,&torep, &param);
+    let param = "(".to_owned() + "internalparam" + "";
+    let torep = "(".to_owned() + &thisargument + "";
+    block = Nstring::replace(&block,&torep, &param);
+    let param = ",".to_owned() + "internalparam" + "";
+    let torep = ",".to_owned() + &thisargument + "";
+    block = Nstring::replace(&block,&torep, &param);
+    //
+    let param = " ".to_owned() + " internalparam" + "";
+    let torep = " ".to_owned() + &thisargument + "";
+    block = Nstring::replace(&block,&torep, &param);
+    block
+}
+
+pub fn nscript_threadscope(code: &str){
+let codeclone = "RAW>".to_owned() + code;
+    thread::spawn(move || {
+
+        let mut threadvmap = Varmap::new();
+
+        nscript_execute_script(&codeclone,"","","","","","","","","",&mut threadvmap);
+        loop {
+            nscript_loops(&mut threadvmap);
+            let activeloops = threadvmap.inobj("nscript_loops");
+
+            if activeloops != "" {
+                break;
+            }
+        }
+    });
+}
