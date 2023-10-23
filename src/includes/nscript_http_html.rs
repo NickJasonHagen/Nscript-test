@@ -86,7 +86,8 @@ pub fn decode_html_url(url: &str) -> String {
     ];
 
     let mut decoded = String::new();
-    let mut iter = url.chars().peekable();
+    let xurl = Nstring::replace(&url,"+"," ");
+    let mut iter = xurl.chars().peekable();
 
     while let Some(ch) = iter.next() {
         if ch == '%' {
@@ -200,19 +201,30 @@ pub fn handle_connection(mut stream: TcpStream,  vmap: &mut Varmap) {
         }
     }
     let request = String::from_utf8_lossy(&buffer[..]);
+    if Nstring::instring(&request, "B blob data") {
+        println!("(debug->returning) Blob data entering: {}",&request);
+        return ; // prevent errors , return!
+    }
+    if Nstring::instring(&request, "POST") == false && Nstring::instring(&request, "GET") == false{
+        println!("A non POST nor GET packet entered: \n {}",&request);
+        return; // clearly we aint gonna handle this (yet)
+
+    }
     //println!("req:{}",&request);
     //let request_clone = request.clone();
-    let domainname = Nstring::stringbetween(&request,"Host: ","\r\n");
+    let domainname = Nstring::replace(&Nstring::stringbetween(&request,"Host: ","\r\n"),"www.","");
     let domainname = split(&domainname,":")[0];
     vmap.setvar("___domainname".to_owned(),&domainname);
     let request_parts: Vec<&str> = request.split(" ").collect();
 //if request_parts[0] != "GET" {return;} // debugger to find that damn crash on b blobdata.
     let mut pathparts = Vec::new();
+    let trimmedreq: String;
     if request_parts.len() > 1 {
-        if request_parts[1].contains("B blob data]") {
+        if request_parts[1].contains("B blob data") {
             return ; // Ignore blob data and return without processing
         }
-        pathparts = split(&request_parts[1][1..],"?");
+        trimmedreq = Nstring::trimleft(&request_parts[1],1);
+        pathparts = split(&trimmedreq,"?");
     }
     else{
 
@@ -250,7 +262,7 @@ pub fn handle_connection(mut stream: TcpStream,  vmap: &mut Varmap) {
     if request_parts[0] == "POST" {
         let mut postdata = String::new();
 
-        let strippostdata = split(&request,"deflate\r\n\r\n");
+        let strippostdata = split(&request,"\r\n\r\n");
         if strippostdata.len() > 1 {
             postdata = "".to_owned() +strippostdata[1] ;// used for post buffer data
             //println!("strippedpostdata:{}",&postdata);
@@ -309,7 +321,6 @@ pub fn handle_connection(mut stream: TcpStream,  vmap: &mut Varmap) {
                         }
                     }
                 }
-
 
                 let url_args = split(&postdata, "&");
                 let mut newparams: Vec<String> = Vec::new();

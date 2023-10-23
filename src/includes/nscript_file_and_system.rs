@@ -1,5 +1,7 @@
 use crate::*;
-
+use sysinfo::{System, SystemExt};
+use psutil::process::Process;
+use std::process;
 pub struct Nfile {
     // nscript filesystem
 }
@@ -131,7 +133,53 @@ pub fn directory_move(source: &str, destination: &str) -> String {
     }
 }
 
+pub fn memorystatus()->String{
+        let mut system = System::new_all();
 
+    // Refresh the system to get the latest information
+    system.refresh_all();
+
+    // Get system memory information
+    let total_memory = system.get_total_memory();
+    let free_memory = system.get_free_memory();
+    let used_memory = total_memory - free_memory;
+
+    // Print the memory information
+    let toreturn = "Total: ".to_owned() + &total_memory.to_string() + " KB\nUsed:"
+    + &used_memory.to_string() + "KB\nFree:" + &free_memory.to_string() + "KB";
+    return toreturn;
+}
+
+pub fn memoryusage() -> String{
+    if let Some(memory_usage) = get_process_memory_usage() {
+        //println!("Process Memory Usage: {} bytes", memory_usage);
+        return memory_usage.to_string();
+    } else {
+        //println!("Failed to get process memory usage.");
+        return "error".to_string();
+    }
+}
+pub fn get_own_pid() -> u32 {
+    // Get the current process ID using std::process::id()
+    process::id()
+}
+
+fn get_process_memory_usage() -> Option<u64> {
+    // Get the current process ID
+    let pid = get_own_pid();
+
+    // Try to get the process by its ID
+    if let Ok(process) = Process::new(pid) {
+        // Get the memory information for the process
+        if let Ok(mem_info) = process.memory_info() {
+            // Return the RSS (Resident Set Size) in bytes
+            return Some(mem_info.rss());
+        }
+    }
+
+    // Return None if there was an error or the process is not found
+    None
+}
 
 // fn convert_array<T: std::fmt::Display>(array: &[T]) -> String {
 //     let elements: Vec<String> = array.iter().map(|element| element.to_string()).collect();

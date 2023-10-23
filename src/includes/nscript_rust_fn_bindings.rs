@@ -86,6 +86,12 @@ pub fn nscript_callfn(
         "zip" => {
             return zip_directory(&param1,&param2);
         }
+        "memusage" => {
+            return memoryusage();
+        }
+        "memstats" | "memorystatus" => {
+            return memorystatus();
+        }
         "objtojson" => {
             return objtojson(&param1,vmap);
         }
@@ -148,8 +154,11 @@ pub fn nscript_callfn(
             return String::from(&ret);
 
         }
+        "inpool" => {
+            return inpool(&param1,&param2);
+        }
         "pooladd" => {
-            return pooladd(&param1,&&param2);
+            return pooladd(&param1,&param2);
         }
         "poolremove" => {
             return poolremove(&param1,&param2);
@@ -183,9 +192,8 @@ pub fn nscript_callfn(
         }
         "delobj"  | "objdel" => {
             // execute deconstruct function (if is has it)
-            let isdeconfn = "_".to_owned() + &param1 + ".deconstruct()"; // should only execute if it exists.. else continue
-            let deconstructfunc = vmap.getcode(&isdeconfn);
-            nscript_parsesheet(&deconstructfunc, vmap);
+            let isdeconfn = "".to_owned() + &param1 + ".deconstruct()"; // should only execute if it exists.. else continue
+            nscript_func(&isdeconfn, vmap);
             vmap.delobj(param1);
             return String::new();
         }
@@ -205,6 +213,8 @@ pub fn nscript_callfn(
         }
         "setobj" => {
             vmap.setobj(param1, param2);
+            let isconfn = "_".to_owned() + &param1 + ".construct()"; // should only execute if it exists.. else continue
+            nscript_func(&isconfn, vmap);
             return String::new();
         }
         "inobj" => {

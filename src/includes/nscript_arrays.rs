@@ -38,6 +38,19 @@ pub fn poolremove(pool: &str,entree: &str)-> String{
     newstring
 }
 
+pub fn inpool(pool: &str,entree: &str) -> String{
+    // nscript arrays wich work with unique entrees,
+    // this function checks wheter a id is inside the pool returns 1 if found 0 if not
+    let array = split(&pool,NC_ARRAY_DELIM);
+    for entr in array{
+        if entr == entree {
+            return "1".to_string();
+        }
+     }
+
+        return "0".to_string();
+
+}
 
 pub fn arraypush(array: &str,data: &str ) -> String {
     return "".to_owned() + &array + NC_ARRAY_DELIM + &data

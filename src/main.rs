@@ -66,7 +66,7 @@ mod ioctlsocket {
 
 //#[cfg(not(windows))]
 //use std::os::unix::io::AsRawFd;
-const NSCRIPT_VERSION: &'static str = "v2.004";
+const NSCRIPT_VERSION: &'static str = "v2.005";
 // const NSCRIPT_INFO: &'static str = "
 // Nscript core in Rust-language.
 // Created by Nick Hagen.
@@ -121,7 +121,7 @@ fn main() -> std::io::Result<()>  {
 
     // run Nscript:server.nc ,define pre logic here, this runs before the stream starts.
     vmap.setvar("self".to_owned(),"server");//<- set self in nscript during scope
-    let serverscriptfilename = SCRIPT_DIR.to_owned() +"server.nc";
+    let serverscriptfilename = SCRIPT_DIR.to_owned() +"system/init.nc";
     nscript_execute_script(&serverscriptfilename,"","","","","","","","","",&mut vmap);
     // retrieve the prop's set for class server in nscript:server.nc
     let server_addres_nc = nscript_checkvar("server.ip", &mut vmap);
