@@ -2,8 +2,18 @@
 name = "nscript_v2"
 version = "0.1.0"
 edition = "2021"
-
+authors = ["NickJasonHagen"]
+license = "MIT OR Apache-2.0"
+description = "RuntimeScriptParser"
+readme = "README.md"
+homepage = "https://github.com/NickJasonHagen/Nscript"
+repository = "https://github.com/NickJasonHagen/Nscript"
+keywords = ["cli", "search", "demo"]
+categories = ["command-line-utilities"]
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[lib]
+name = ["lib"]
 
 [dependencies]
 chrono = "0.4.23"
