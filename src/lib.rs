@@ -28,19 +28,19 @@ pub mod nscriptlib{
     //use regex::Regex;
     use std::thread;
     //mod nscriptapilib;
-    pub mod includes {
-        pub mod nscript_zip;
-        pub mod nscript_api_lib;
-        pub mod nscript_functions;
-        pub mod nscript_arrays;
-        pub mod nscript_file_and_system;
-        pub mod nscript_strings;
-        pub mod nscript_interpreter;
-        pub mod nscript_rust_fn_bindings;
-        pub mod nscript_http_html;
-        pub mod nscript_time;
+    //pub mod includes {
+        pub mod includes::nscript_zip;
+        pub mod includes::nscript_api_lib;
+        pub mod includes::nscript_functions;
+        pub mod includes::nscript_arrays;
+        pub mod includes::nscript_file_and_system;
+        pub mod includes::nscript_strings;
+        pub mod includes::nscript_interpreter;
+        pub mod includes::nscript_rust_fn_bindings;
+        pub mod includes::nscript_http_html;
+        pub mod includes::nscript_time;
 
-    }
+    //}
     use includes::nscript_time::*;
     use includes::nscript_http_html::*;
     use includes::nscript_rust_fn_bindings::*;
@@ -56,7 +56,7 @@ pub mod nscriptlib{
     use reqwest::blocking::get;
     use rand::Rng;
     #[cfg(windows)]
-    mod ioctlsocket {
+   pub  mod ioctlsocket {
         use std::os::windows::raw::SOCKET;
         use std::os::raw::{c_long, c_ulong};
 
