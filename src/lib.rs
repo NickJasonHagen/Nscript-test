@@ -29,16 +29,16 @@ pub mod nscriptlib{
     use std::thread;
     //mod nscriptapilib;
     //pub mod includes {
-        pub mod includes::nscript_zip;
-        pub mod includes::nscript_api_lib;
-        pub mod includes::nscript_functions;
-        pub mod includes::nscript_arrays;
-        pub mod includes::nscript_file_and_system;
-        pub mod includes::nscript_strings;
-        pub mod includes::nscript_interpreter;
-        pub mod includes::nscript_rust_fn_bindings;
-        pub mod includes::nscript_http_html;
-        pub mod includes::nscript_time;
+        // pub mod includes::nscript_zip;
+        // pub mod includes::nscript_api_lib;
+        // pub mod includes::nscript_functions;
+        // pub mod includes::nscript_arrays;
+        // pub mod includes::nscript_file_and_system;
+        // pub mod includes::nscript_strings;
+        // pub mod includes::nscript_interpreter;
+        // pub mod includes::nscript_rust_fn_bindings;
+        // pub mod includes::nscript_http_html;
+        // pub mod includes::nscript_time;
 
     //}
     use includes::nscript_time::*;
