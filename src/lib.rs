@@ -41,16 +41,16 @@ pub mod nscriptlib{
         // pub mod includes::nscript_time;
 
     //}
-    use includes::nscript_time::*;
-    use includes::nscript_http_html::*;
-    use includes::nscript_rust_fn_bindings::*;
-    use includes::nscript_zip::*;
-    use includes::nscript_interpreter::*;
-    use includes::nscript_api_lib::*;
-    use includes::nscript_functions::*;
-    use includes::nscript_strings::*;
-    use includes::nscript_arrays::*;
-    use includes::nscript_file_and_system::*;
+    use nscriptlib::includes::nscript_time::*;
+    use nscriptlib::includes::nscript_http_html::*;
+    use nscriptlib::includes::nscript_rust_fn_bindings::*;
+    use nscriptlib::includes::nscript_zip::*;
+    use nscriptlib::includes::nscript_interpreter::*;
+    use nscriptlib::includes::nscript_api_lib::*;
+    use nscriptlib::includes::nscript_functions::*;
+    use nscriptlib::includes::nscript_strings::*;
+    use nscriptlib::includes::nscript_arrays::*;
+    use nscriptlib::includes::nscript_file_and_system::*;
 
 
     use reqwest::blocking::get;
