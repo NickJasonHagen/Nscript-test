@@ -27,7 +27,7 @@ use hex::FromHex;
 //use regex::Regex;
 use std::thread;
 //mod nscriptapilib;
-mod includes {
+pub mod includes {
     pub mod nscript_zip;
     pub mod nscript_api_lib;
     pub mod nscript_functions;
