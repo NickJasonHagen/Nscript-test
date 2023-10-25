@@ -1,3 +1,4 @@
+use std::char::ToLowercase;
 // Nscript v2 ( remade from au3 nscript) by Nick Hagen.
 use std::collections::{HashMap};
 //use std::{env, array, string};
@@ -94,21 +95,70 @@ const SCRIPT_DIR : &str = "./";
 const SCRIPT_DIR: &str = ".\\";
 use std::env;
 //use std::path::{PathBuf, Path};
-fn main() -> std::io::Result<()>  {
 
-       //let args: Vec<String> = env::args().collect();
 
-    // The first argument (index 0) is the name of the binary itself.
-    // The actual command-line arguments start from index 1.
-    // if args.len() > 1 {
-    //     println!("Command-line arguments:");
-    //     for (index, arg) in args.iter().enumerate().skip(1) {
-    //         println!("{}: {}", index, arg);
-    //     }
-    // } else {
-    //     println!("No command-line arguments provided.");
-    // }
+fn main(){
+    let mode = terminal_get_user_input("\n ---Nscript launcher!-------------\n\n1) Run clean (system/clean.nc) \n2) Run nscript as a http server\n3) run a custom script!   pick mode 1/2/3 \n -------------","1");
+    match mode.as_str() {
+        "1" => {
+            main_clean();
+        }
+        "2" => {
+            main_http();
 
+        }
+        "3" => {
+            let scriptname = terminal_get_user_input("Your script full path (or from bin path)","./myscript.nc");
+            if Nfile::checkexists(&scriptname) {
+                main_custom(&scriptname);
+            }
+            else{
+                cwrite("Coulnd find the script at the given location!?","r");
+            }
+        }
+        _ => {
+            main_clean();
+
+        }
+
+    }
+
+}
+
+fn main_clean() -> std::io::Result<()>  {
+
+    let mut vmap = Varmap::new(); // global
+
+    println!("Starting fn main() Nscript {}",NSCRIPT_VERSION);
+    println!("____________________________________");
+
+    let serverscriptfilename = SCRIPT_DIR.to_owned() +"system/clean.nc";
+    nscript_execute_script(&serverscriptfilename,"","","","","","","","","",&mut vmap);
+
+    loop {
+        nscript_loops(&mut vmap);
+
+    }
+}
+
+fn main_custom(scriptloc: &str) -> std::io::Result<()>  {
+
+    let mut vmap = Varmap::new(); // global
+
+    println!("Starting fn main() Nscript {}",NSCRIPT_VERSION);
+    println!("____________________________________");
+
+    let serverscriptfilename = SCRIPT_DIR.to_owned() + &scriptloc;
+    nscript_execute_script(&serverscriptfilename,"","","","","","","","","",&mut vmap);
+
+    loop {
+        nscript_loops(&mut vmap);
+
+    }
+}
+
+
+fn main_http() -> std::io::Result<()>  {
     let mut vmap = Varmap::new(); // global
 
     println!("Starting fn main() Nscript {}",NSCRIPT_VERSION);
@@ -176,7 +226,3 @@ fn main() -> std::io::Result<()>  {
         }
     }
 }
-
-
-
-
