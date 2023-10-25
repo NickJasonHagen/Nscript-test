@@ -12,8 +12,8 @@ keywords = ["cli", "search", "demo"]
 categories = ["command-line-utilities"]
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
-[lib]
-name = "nscript_v2"
+#[lib]
+#name = "nscript_v2"
 
 [dependencies]
 chrono = "0.4.23"

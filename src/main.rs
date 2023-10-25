@@ -1,4 +1,3 @@
-//use core::num::dec2flt::parse::parse_number;
 // Nscript v2 ( remade from au3 nscript) by Nick Hagen.
 use std::collections::{HashMap};
 //use std::{env, array, string};
@@ -27,39 +26,33 @@ use hex::FromHex;
 //use regex::Regex;
 use std::thread;
 //mod nscriptapilib;
-// pub mod includes {
-//     pub mod nscript_zip;
-//     pub mod nscript_api_lib;
-//     pub mod nscript_functions;
-//     pub mod nscript_arrays;
-//     pub mod nscript_file_and_system;
-//     pub mod nscript_strings;
-//     pub mod nscript_interpreter;
-//     pub mod nscript_rust_fn_bindings;
-//     pub mod nscript_http_html;
-//     pub mod nscript_time;
-//
-// }
-// use includes::nscript_time::*;
-// use includes::nscript_http_html::*;
-// use includes::nscript_rust_fn_bindings::*;
-// use includes::nscript_zip::*;
-// use includes::nscript_interpreter::*;
-// use includes::nscript_api_lib::*;
-// use includes::nscript_functions::*;
-// use includes::nscript_strings::*;
-// use includes::nscript_arrays::*;
-// use includes::nscript_file_and_system::*;
-    use nscriptlib::includes::nscript_time::*;
-    use nscriptlib::includes::nscript_http_html::*;
-    use nscriptlib::includes::nscript_rust_fn_bindings::*;
-    use nscriptlib::includes::nscript_zip::*;
-    use nscriptlib::includes::nscript_interpreter::*;
-    use nscriptlib::includes::nscript_api_lib::*;
-    use nscriptlib::includes::nscript_functions::*;
-    use nscriptlib::includes::nscript_strings::*;
-    use nscriptlib::includes::nscript_arrays::*;
-    use nscriptlib::includes::nscript_file_and_system::*;
+mod includes {
+    pub mod nscript_zip;
+    pub mod nscript_api_lib;
+    pub mod nscript_functions;
+    pub mod nscript_arrays;
+    pub mod nscript_file_and_system;
+    pub mod nscript_strings;
+    pub mod nscript_interpreter;
+    pub mod nscript_rust_fn_bindings;
+    pub mod nscript_http_html;
+    pub mod nscript_time;
+
+
+}
+use includes::nscript_time::*;
+use includes::nscript_http_html::*;
+use includes::nscript_rust_fn_bindings::*;
+use includes::nscript_zip::*;
+use includes::nscript_interpreter::*;
+use includes::nscript_api_lib::*;
+use includes::nscript_functions::*;
+use includes::nscript_strings::*;
+use includes::nscript_arrays::*;
+use includes::nscript_file_and_system::*;
+
+
+
 
 use reqwest::blocking::get;
 use rand::Rng;
@@ -101,13 +94,6 @@ const SCRIPT_DIR : &str = "./";
 const SCRIPT_DIR: &str = ".\\";
 use std::env;
 //use std::path::{PathBuf, Path};
-
-
-
-
-
-
-
 fn main() -> std::io::Result<()>  {
 
        //let args: Vec<String> = env::args().collect();
