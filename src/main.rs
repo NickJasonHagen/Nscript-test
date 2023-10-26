@@ -125,9 +125,28 @@ fn main(){
 
 }
 
+fn testoverride(fnname: &str,vmap: &mut Varmap)-> String{
+
+    if fnname == "testing" {
+        cwrite("testingoverrides!!","g");
+
+        cwrite(&vmap.param1,"g");
+        cwrite(&vmap.param2,"g");
+        cwrite(&vmap.param3,"g");
+        return vmap.param1.to_owned()
+    }
+    "".to_owned()
+
+}
+
 fn main_clean() -> std::io::Result<()>  {
 
     let mut vmap = Varmap::new(); // global
+
+
+
+    vmap.setextentionfunctions(testoverride);
+
 
     println!("Starting fn main() Nscript {}",NSCRIPT_VERSION);
     println!("____________________________________");

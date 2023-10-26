@@ -1,44 +1,48 @@
 
 use crate::*;
+//
+// trait nscript_override{
+//     fn nscript_custom_functions(
+//         func: &str,
+//         param1: &str,
+//         param2: &str,
+//         param3: &str,
+//         param4: &str,
+//         param5: &str,
+//         param6: &str,
+//         param7: &str,
+//         param8: &str,
+//         param9: &str,
+//         vmap: &mut Varmap,
+//     ) -> String {
+//         "".to_string() // Default implementation returns an empty string
+//     }
+// }
+// #[derive(Debug)]
+// struct Nscriptfunctions {
+// }
+//
+// impl nscript_override for Nscriptfunctions{
+//     fn nscript_custom_functions(
+//         func: &str,
+//         param1: &str,
+//         param2: &str,
+//         param3: &str,
+//         param4: &str,
+//         param5: &str,
+//         param6: &str,
+//         param7: &str,
+//         param8: &str,
+//         param9: &str,
+//         vmap: &mut Varmap,
+//     ) -> String {
+//         "".to_string() // Default implementation returns an empty string
+//     }
+// }
 
-trait nscript_override{
-    fn nscript_custom_functions(
-        func: &str,
-        param1: &str,
-        param2: &str,
-        param3: &str,
-        param4: &str,
-        param5: &str,
-        param6: &str,
-        param7: &str,
-        param8: &str,
-        param9: &str,
-        vmap: &mut Varmap,
-    ) -> String {
-        "".to_string() // Default implementation returns an empty string
-    }
-}
-#[derive(Debug)]
-struct Nscriptfunctions {
-}
 
-impl nscript_override for Nscriptfunctions{
-    fn nscript_custom_functions(
-        func: &str,
-        param1: &str,
-        param2: &str,
-        param3: &str,
-        param4: &str,
-        param5: &str,
-        param6: &str,
-        param7: &str,
-        param8: &str,
-        param9: &str,
-        vmap: &mut Varmap,
-    ) -> String {
-        "".to_string() // Default implementation returns an empty string
-    }
-}
+
+
 
     pub fn nscript_callfn(
         func: &str,
@@ -61,10 +65,15 @@ impl nscript_override for Nscriptfunctions{
         // this is where you can override the built in functions with your custom functions and extent the
         // current functions with your own, just make a switch on the func and the others are given
         // arguments from the .nc calls
-        let customfunctions = Nscriptfunctions::nscript_custom_functions(&func,&param1,&param2,&param3,&param4,&param5,&param6,&param7,&param8,&param9,vmap);
-        if customfunctions != "" {
-            return customfunctions
-        }
+        // let customfunctions = Nscriptfunctions::nscript_custom_functions(&func,&param1,&param2,&param3,&param4,&param5,&param6,&param7,&param8,&param9,vmap);
+        // if customfunctions != "" {
+        //     return customfunctions
+        // }
+    let mut custom_behavior: NscriptCustomFunctions = vmap.fnextentions;
+    let customret = custom_behavior(&func,vmap);
+    if customret != ""{
+        return customret
+    }
 
         match func {
             // "scope" => {
