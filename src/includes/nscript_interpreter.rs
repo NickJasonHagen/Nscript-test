@@ -448,7 +448,7 @@ pub fn nscript_parsesheet(coderaw: &str, vmap: &mut Varmap) -> String {
     let fixedcode = nscript_stripcomments(&fixedcode);
     let fixedcode = trim_lines(&fixedcode);
     let fixedcode = nscript_stringextract(&fixedcode);
-let fixedcode = nscript_formatargumentspaces(&fixedcode);
+    let fixedcode = nscript_formatargumentspaces(&fixedcode);
     let fixedcode  = nscript_scopeextract(&fixedcode);
 
     //let fixedcode = nscript_compilesheet(&code);
@@ -511,6 +511,7 @@ pub fn nscript_parseline(line: &str, vmap: &mut Varmap) -> String {
     match words.len() {
         1 => {
             // 1 word lines
+
             let pref = nscript_getprefix(&words[0]);
             match pref.as_str() {
                 // these are checks for 1 word lines ( internally this can be
@@ -747,7 +748,7 @@ pub fn nscript_parseline(line: &str, vmap: &mut Varmap) -> String {
                         vmap.setvar(words[0].to_string(), &res);
                         return res;
                     }
-                    "combine" => {
+                    "combine" | "cat" => {
                         let res = nscript_combine(&words, vmap);
                         //println!("Combine:{}", res);
                         vmap.setvar(words[0].to_string(), &res);
@@ -1444,6 +1445,9 @@ pub fn nscript_getprefix(s: &str) -> String {
           if Nstring::instring(&s, "(") == true && Nstring::instring(&s, ")") == true {
                 return String::from("call");
             } else {
+                if s == "exit" || s == "Exit"{
+                    process::exit(1);
+                }
                 return String::from("var");
             }
         }
@@ -2249,3 +2253,5 @@ let codeclone = "RAW>".to_owned() + code;
         }
     });
 }
+
+
