@@ -5,10 +5,10 @@ pub const PROGRAM_DIR: &str = env!("CARGO_MANIFEST_DIR");
 pub const NC_ARRAY_DELIM : &str = "]].n.c.arr.[[";
 pub const NC_ASYNC_LOOPS_KEY : &str = "coroutine"; // async loops scopes keyword
 
-pub type NscriptCustomFunctions = fn(&str,&mut Varmap) -> String;
+pub type NscriptCustomFunctions = fn(&mut Varmap) -> String;
 
 
-pub fn emptyfnbuffer(fnname: &str,vmap: &mut Varmap) -> String{
+pub fn emptyfnbuffer(vmap: &mut Varmap) -> String{
     // Default behavior
     "".to_string()
 }
@@ -2099,82 +2099,91 @@ pub fn nscript_getarguments(fnword: &str, vmap: &mut Varmap) -> (Vec<String>, us
             indx = indx + 1;
         }
     }
-    nscript_registerline(&cmdlineraw,vmap);
+    nscript_registerline(&cmdline,vmap);
         (cmdline, cmdlineraw.len())
 }
-
-pub fn nscript_registerline(cmdline:&Vec<&str>,vmap: &mut Varmap){
-// maps the used line to vmap, usage in function extentions as a lib
+pub fn nscript_registerline(cmdline:&Vec<String>,vmap: &mut Varmap){
+    // maps the used line to vmap, usage in function extentions as a lib
     // yeah i know its fugly, but it will work like a charm!
     match cmdline.len() {
-        10 => {
-            vmap.funcname = nscript_checkvar(cmdline[0],vmap).to_string();
-            vmap.param1 = nscript_checkvar(cmdline[1],vmap).to_string();
-            vmap.param2 = nscript_checkvar(cmdline[2],vmap).to_string();
-            vmap.param3 = nscript_checkvar(cmdline[3],vmap).to_string();
-            vmap.param4 = nscript_checkvar(cmdline[4],vmap).to_string();
-            vmap.param5 = nscript_checkvar(cmdline[5],vmap).to_string();
-            vmap.param6 = nscript_checkvar(cmdline[6],vmap).to_string();
-            vmap.param7 = nscript_checkvar(cmdline[7],vmap).to_string();
-            vmap.param8 = nscript_checkvar(cmdline[8],vmap).to_string();
-            vmap.param9 = nscript_checkvar(cmdline[9],vmap).to_string();
-
+       10 => {
+            vmap.funcname = cmdline[0].to_string();
+            vmap.param1 = cmdline[1].to_string();
+            vmap.param2 = cmdline[2].to_string();
+            vmap.param3 = cmdline[3].to_string();
+            vmap.param4 = cmdline[4].to_string();
+            vmap.param5 = cmdline[5].to_string();
+            vmap.param6 = cmdline[6].to_string();
+            vmap.param7 = cmdline[7].to_string();
+            vmap.param8 = cmdline[8].to_string();
+            vmap.param9 = cmdline[9].to_string();
+        }
+        9 => {
+            vmap.funcname = cmdline[0].to_string();
+            vmap.param1 = cmdline[1].to_string();
+            vmap.param2 = cmdline[2].to_string();
+            vmap.param3 = cmdline[3].to_string();
+            vmap.param4 = cmdline[4].to_string();
+            vmap.param5 = cmdline[5].to_string();
+            vmap.param6 = cmdline[6].to_string();
+            vmap.param7 = cmdline[7].to_string();
+            vmap.param8 = cmdline[8].to_string();
+            vmap.param9 = "".to_string();
         }
         8 => {
-            vmap.funcname = nscript_checkvar(cmdline[0],vmap).to_string();
-            vmap.param1 = nscript_checkvar(cmdline[1],vmap).to_string();
-            vmap.param2 = nscript_checkvar(cmdline[2],vmap).to_string();
-            vmap.param3 = nscript_checkvar(cmdline[3],vmap).to_string();
-            vmap.param4 = nscript_checkvar(cmdline[4],vmap).to_string();
-            vmap.param5 = nscript_checkvar(cmdline[5],vmap).to_string();
-            vmap.param6 = nscript_checkvar(cmdline[6],vmap).to_string();
-            vmap.param7 = nscript_checkvar(cmdline[7],vmap).to_string();
-            vmap.param8 = nscript_checkvar(cmdline[8],vmap).to_string();
+            vmap.funcname = cmdline[0].to_string();
+            vmap.param1 = cmdline[1].to_string();
+            vmap.param2 = cmdline[2].to_string();
+            vmap.param3 = cmdline[3].to_string();
+            vmap.param4 = cmdline[4].to_string();
+            vmap.param5 = cmdline[5].to_string();
+            vmap.param6 = cmdline[6].to_string();
+            vmap.param7 = cmdline[7].to_string();
+            vmap.param8 = "".to_string();
             vmap.param9 = "".to_string();
         }
 
         7 => {
-            vmap.funcname = nscript_checkvar(cmdline[0],vmap).to_string();
-            vmap.param1 = nscript_checkvar(cmdline[1],vmap).to_string();
-            vmap.param2 = nscript_checkvar(cmdline[2],vmap).to_string();
-            vmap.param3 = nscript_checkvar(cmdline[3],vmap).to_string();
-            vmap.param4 = nscript_checkvar(cmdline[4],vmap).to_string();
-            vmap.param5 = nscript_checkvar(cmdline[5],vmap).to_string();
-            vmap.param6 = nscript_checkvar(cmdline[6],vmap).to_string();
-            vmap.param7 = nscript_checkvar(cmdline[7],vmap).to_string();
+            vmap.funcname = cmdline[0].to_string();
+            vmap.param1 = cmdline[1].to_string();
+            vmap.param2 = cmdline[2].to_string();
+            vmap.param3 = cmdline[3].to_string();
+            vmap.param4 = cmdline[4].to_string();
+            vmap.param5 = cmdline[5].to_string();
+            vmap.param6 = cmdline[6].to_string();
+            vmap.param7 = "".to_string();
             vmap.param8 = "".to_string();
             vmap.param9 = "".to_string();
         }
         6 => {
-            vmap.funcname = nscript_checkvar(cmdline[0],vmap).to_string();
-            vmap.param1 = nscript_checkvar(cmdline[1],vmap).to_string();
-            vmap.param2 = nscript_checkvar(cmdline[2],vmap).to_string();
-            vmap.param3 = nscript_checkvar(cmdline[3],vmap).to_string();
-            vmap.param4 = nscript_checkvar(cmdline[4],vmap).to_string();
-            vmap.param5 = nscript_checkvar(cmdline[5],vmap).to_string();
-            vmap.param6 = nscript_checkvar(cmdline[6],vmap).to_string();
+            vmap.funcname = cmdline[0].to_string();
+            vmap.param1 = cmdline[1].to_string();
+            vmap.param2 = cmdline[2].to_string();
+            vmap.param3 = cmdline[3].to_string();
+            vmap.param4 = cmdline[4].to_string();
+            vmap.param5 = cmdline[5].to_string();
+            vmap.param6 = "".to_string();
             vmap.param7 = "".to_string();
             vmap.param8 = "".to_string();
             vmap.param9 = "".to_string();
         }
         5 => {
-            vmap.funcname = nscript_checkvar(cmdline[0],vmap).to_string();
-            vmap.param1 = nscript_checkvar(cmdline[1],vmap).to_string();
-            vmap.param2 = nscript_checkvar(cmdline[2],vmap).to_string();
-            vmap.param3 = nscript_checkvar(cmdline[3],vmap).to_string();
-            vmap.param4 = nscript_checkvar(cmdline[4],vmap).to_string();
-            vmap.param5 = nscript_checkvar(cmdline[5],vmap).to_string();
+            vmap.funcname = cmdline[0].to_string();
+            vmap.param1 = cmdline[1].to_string();
+            vmap.param2 = cmdline[2].to_string();
+            vmap.param3 = cmdline[3].to_string();
+            vmap.param4 = cmdline[4].to_string();
+            vmap.param5 = "".to_string();
             vmap.param6 = "".to_string();
             vmap.param7 = "".to_string();
             vmap.param8 = "".to_string();
             vmap.param9 = "".to_string();
         }
         4 => {
-            vmap.funcname = nscript_checkvar(cmdline[0],vmap).to_string();
-            vmap.param1 = nscript_checkvar(cmdline[1],vmap).to_string();
-            vmap.param2 = nscript_checkvar(cmdline[2],vmap).to_string();
-            vmap.param3 = nscript_checkvar(cmdline[3],vmap).to_string();
-            vmap.param4 = "".to_string();
+            vmap.funcname = cmdline[0].to_string();
+            vmap.param1 = cmdline[1].to_string();
+            vmap.param2 = cmdline[2].to_string();
+            vmap.param3 = cmdline[3].to_string();
             vmap.param4 = "".to_string();
             vmap.param5 = "".to_string();
             vmap.param6 = "".to_string();
@@ -2183,11 +2192,10 @@ pub fn nscript_registerline(cmdline:&Vec<&str>,vmap: &mut Varmap){
             vmap.param9 = "".to_string();
         }
         3 => {
-            vmap.funcname = nscript_checkvar(cmdline[0],vmap).to_string();
-            vmap.param1 = nscript_checkvar(cmdline[1],vmap).to_string();
-            vmap.param2 = nscript_checkvar(cmdline[2],vmap).to_string();
+            vmap.funcname = cmdline[0].to_string();
+            vmap.param1 = cmdline[1].to_string();
+            vmap.param2 = cmdline[2].to_string();
             vmap.param3 = "".to_string();
-            vmap.param4 = "".to_string();
             vmap.param4 = "".to_string();
             vmap.param5 = "".to_string();
             vmap.param6 = "".to_string();
@@ -2197,11 +2205,10 @@ pub fn nscript_registerline(cmdline:&Vec<&str>,vmap: &mut Varmap){
 
         }
         2 => {
-            vmap.funcname = nscript_checkvar(cmdline[0],vmap).to_string();
-            vmap.param1 = nscript_checkvar(cmdline[1],vmap).to_string();
+            vmap.funcname = cmdline[0].to_string();
+            vmap.param1 = cmdline[1].to_string();
             vmap.param2 = "".to_string();
             vmap.param3 = "".to_string();
-            vmap.param4 = "".to_string();
             vmap.param4 = "".to_string();
             vmap.param5 = "".to_string();
             vmap.param6 = "".to_string();
@@ -2211,10 +2218,10 @@ pub fn nscript_registerline(cmdline:&Vec<&str>,vmap: &mut Varmap){
 
         }
         1 => {
-            vmap.param1 = nscript_checkvar(cmdline[1],vmap).to_string();
+            vmap.funcname = cmdline[0].to_string();
+            vmap.param1 = "".to_string();
             vmap.param2 = "".to_string();
             vmap.param3 = "".to_string();
-            vmap.param4 = "".to_string();
             vmap.param4 = "".to_string();
             vmap.param5 = "".to_string();
             vmap.param6 = "".to_string();
@@ -2223,10 +2230,9 @@ pub fn nscript_registerline(cmdline:&Vec<&str>,vmap: &mut Varmap){
             vmap.param9 = "".to_string();
         }
         _ => {
-            vmap.param1 = "".to_string();
+            vmap.funcname = "".to_string();
             vmap.param2 = "".to_string();
             vmap.param3 = "".to_string();
-            vmap.param4 = "".to_string();
             vmap.param4 = "".to_string();
             vmap.param5 = "".to_string();
             vmap.param6 = "".to_string();
@@ -2237,6 +2243,7 @@ pub fn nscript_registerline(cmdline:&Vec<&str>,vmap: &mut Varmap){
 
     }
 }
+
 
 pub fn nscript_funcextract(text: &str,vmap: &mut Varmap) -> String {
     // this function will extract and run nested functions from inner to outer

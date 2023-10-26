@@ -70,7 +70,7 @@ use crate::*;
         //     return customfunctions
         // }
     let mut custom_behavior: NscriptCustomFunctions = vmap.fnextentions;
-    let customret = custom_behavior(&func,vmap);
+    let customret = custom_behavior(vmap);
     if customret != ""{
         return customret
     }

@@ -125,9 +125,14 @@ fn main(){
 
 }
 
-fn testoverride(fnname: &str,vmap: &mut Varmap)-> String{
-
-    if fnname == "testing" {
+fn testoverride(vmap: &mut Varmap)-> String{
+// testoverride requires vmap, this function extents the parsers functions to be used in Nscript.
+    // you can retrieve the nscript call's data by using : vmap.funcname ( the name of the function)
+    // and vmap.param1 ~ vmap.param9 , hardcoded functions be capped to 9 arguments, here you can
+    // map your own logic, just return the result as a String and the parser will manage the rest.
+    // params and funcnames are all String. if they are unused by nscript they are set to be empty
+    // if your function requires data you can check by if vmap.param1 != "" error(yourlogic)
+    if vmap.funcname == "testing" {
         cwrite("testingoverrides!!","g");
 
         cwrite(&vmap.param1,"g");
